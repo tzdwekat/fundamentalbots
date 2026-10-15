@@ -2,7 +2,8 @@
 
 Rules (spec, "Period selection from companyfacts"):
 - Only 10-K/10-Q (and amendments) feed the series.
-- Durations: annual 350-380 days, quarterly 80-100 days; anything else (YTD) is dropped.
+- Durations: annual 350-380 days, quarterly 80-100 days; 6-month (160-200) and 9-month (240-290) YTD facts
+  are used only to derive Q2/Q3 (12/16-week retail quarters included); anything else is dropped.
 - Per (start, end) the latest-filed value wins; restated if it moved >0.5% from the first filed value.
 - Q4 = FY - (Q1+Q2+Q3), flagged derived.
 - Fiscal year of a period end is resolved by date against the company's fiscal year end.
@@ -14,6 +15,7 @@ import pandas as pd
 import yaml
 
 PERIODIC_FORMS = {"10-K", "10-K/A", "10-Q", "10-Q/A"}
+NON_ADDITIVE = {"diluted_shares"}  # averages: never derive Q2-Q4 by subtraction
 TAG_MAP_PATH = Path(__file__).parent / "tag_map.yaml"
 class InsufficientHistory(ValueError):
     pass
@@ -73,6 +75,22 @@ def fiscal_year_end(facts: pd.DataFrame, tag_map: dict[str, list[str]]) -> tuple
     raise InsufficientHistory("no annual 10-K facts in companyfacts (new registrant CIK, or not a 10-K filer)")
 
 
+def fy_offset(facts: pd.DataFrame, tag_map: dict[str, list[str]]) -> int:
+    """Company's fiscal-year label minus the calendar year of its FY end, from the latest 10-K's own fy field
+    (Home Depot's year ending 2026-02-01 is its fiscal 2025 -> -1; Apple, Nvidia, Walmart -> 0)."""
+    df = _periodic(facts)
+    for tags in tag_map.values():
+        tag = choose_tag(df, tags)
+        if tag is None:
+            continue
+        ann = df[(df.tag == tag) & _is_annual(df) & (df.form == "10-K") & (df.fp == "FY")].sort_values("end_date")
+        if ann.empty:
+            continue
+        r = ann.iloc[-1]
+        return 0 if pd.isna(r.fy) else int(r.fy) - r.end_date.year
+    return 0
+
+
 def _safe_date(y: int, m: int, d: int) -> date:
     while True:
         try:
@@ -102,15 +120,16 @@ def _dedupe(sub: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int]) -> pd.DataFrame:
+def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int], offset: int = 0, additive: bool = True) -> pd.DataFrame:
     sub = _dedupe(df[df.tag == tag])
     rows = []
     ytd = {}  # (fy, fq) -> row for 6- and 9-month year-to-date facts
     instant = sub.start_date.isna().all()
     for r in sub.itertuples(index=False):
         end = r.end_date
-        fy = fy_of(end, fye)
-        fq = fq_of(end, fy, fye)
+        fy_cal = fy_of(end, fye)
+        fq = fq_of(end, fy_cal, fye)
+        fy = fy_cal + offset
         if instant:
             if fq < 1 or fq > 4:
                 continue
@@ -121,11 +140,11 @@ def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int]) -> pd.DataFram
             rows.append((fy, 0, r.start_date, end, r.value, r.accession, r.restated, False))
         elif 80 <= r.dur <= 100 and 1 <= fq <= 4:
             rows.append((fy, fq, r.start_date, end, r.value, r.accession, r.restated, False))
-        elif (170 <= r.dur <= 190 and fq == 2) or (260 <= r.dur <= 280 and fq == 3):
+        elif (160 <= r.dur <= 200 and fq == 2) or (240 <= r.dur <= 290 and fq == 3):
             ytd[(fy, fq)] = (fy, fq, r.start_date, end, r.value, r.accession, r.restated)
     out = pd.DataFrame(rows, columns=["fy", "fq", "start", "end", "value", "accession", "restated", "derived"])
     out = out.drop_duplicates(["fy", "fq"], keep="last")
-    if not instant:
+    if not instant and additive:
         out = _derive_from_ytd(out, ytd)
         out = _derive_q4(out)
     out["tag"] = tag
@@ -177,12 +196,13 @@ def _derive_q4(out: pd.DataFrame) -> pd.DataFrame:
 def build_series(facts: pd.DataFrame, tag_map: dict[str, list[str]]) -> dict[str, pd.DataFrame]:
     df = _periodic(facts)
     fye = fiscal_year_end(facts, tag_map)
+    offset = fy_offset(facts, tag_map)
     series = {}
     for item, tags in tag_map.items():
         tag = choose_tag(df, tags)
         if tag is None:
             continue
-        s = _build_item(df, tag, fye)
+        s = _build_item(df, tag, fye, offset, additive=item not in NON_ADDITIVE)
         if not s.empty:
             series[item] = s
     return series

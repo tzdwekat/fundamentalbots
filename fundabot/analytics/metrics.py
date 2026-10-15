@@ -6,7 +6,8 @@ import pandas as pd
 from fundabot.analytics import bounds, periods
 
 GROWTH_ITEMS = ["revenue", "gross_profit", "operating_income", "eps_diluted", "fcf"]
-PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag"}
+PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag",
+                    "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted"}
 NONPOS = object()  # sentinel: nonpositive denominator
 
 
@@ -89,7 +90,7 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
 
     # 1. Base items straight from XBRL.
     for item, df in series.items():
-        unit = "USD/share" if item == "eps_diluted" else "USD"
+        unit = {"eps_diluted": "USD/share", "diluted_shares": "shares"}.get(item, "USD")
         for r in df.itertuples(index=False):
             if r.fy in base_window:
                 prov = {"accession": r.accession, "start": None if r.start is None else str(r.start), "end": str(r.end)}
@@ -102,6 +103,14 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
             t.add(combine("gross_profit", p, "revenue - cost_of_revenue",
                           {"revenue": t.get("revenue", p), "cost_of_revenue": t.get("cost_of_revenue", p)},
                           lambda v: v["revenue"] - v["cost_of_revenue"], "USD"))
+        if t.get("da", p) is None and t.get("depreciation", p):
+            dep, amort = t.get("depreciation", p), t.get("amortization", p)
+            if amort:
+                t.add(combine("da", p, "depreciation + amortization", {"depreciation": dep, "amortization": amort},
+                              lambda v: v["depreciation"] + v["amortization"], "USD", flags=["da_composed"]))
+            else:
+                t.add(combine("da", p, "depreciation (no amortization line)", {"depreciation": dep}, lambda v: v["depreciation"], "USD",
+                              flags=["da_composed", "depreciation_only"]))
         if t.get("ocf", p) and t.get("capex", p):
             t.add(combine("fcf", p, "ocf - capex", {"ocf": t.get("ocf", p), "capex": t.get("capex", p)},
                           lambda v: v["ocf"] - v["capex"], "USD"))
@@ -109,8 +118,11 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
             t.add(combine("ebitda", p, "operating_income + da",
                           {"operating_income": t.get("operating_income", p), "da": t.get("da", p)},
                           lambda v: v["operating_income"] + v["da"], "USD"))
-        ltd, std = t.get("long_term_debt", p), t.get("short_term_debt", p)
-        if ltd:
+        ltd, std, tot = t.get("long_term_debt", p), t.get("short_term_debt", p), t.get("total_debt_reported", p)
+        if ltd is None and tot:
+            t.add(combine("total_debt", p, "reported total debt tag", {"total_debt_reported": tot}, lambda v: v["total_debt_reported"], "USD",
+                          flags=["debt_total_tag"]))
+        elif ltd:
             if std:
                 t.add(combine("total_debt", p, "short_term_debt + long_term_debt", {"short_term_debt": std, "long_term_debt": ltd},
                               lambda v: v["short_term_debt"] + v["long_term_debt"], "USD"))

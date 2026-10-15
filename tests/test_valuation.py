@@ -129,3 +129,57 @@ def test_history_ignores_amendments_and_duplicate_labels():
     px = prices([(date(2024, 2, 1), 300.0), (date(2024, 4, 1), 100.0), (date(2024, 12, 31), 250.0)])
     out = valuation.compute_valuation(series, facts, px, filings, date(2024, 12, 31), compute_fundamental_metrics(series))
     assert [m.value for m in out if m.metric_id == "pe" and m.period == "FY2023"] == [30.0]
+
+
+def test_dcf_growth_falls_back_to_3y_when_5y_is_null():
+    # FY2021..FY2024 only: fcf_cagr_5y is null (no FY2019), fcf_cagr_3y is 10%.
+    ocf = [10.0] * 4 + [11.0] * 4 + [12.1] * 4 + [13.31] * 4
+    series = {"revenue": quarterly("revenue", [100.0] * 16, 2021), "ocf": quarterly("ocf", ocf, 2021), "capex": quarterly("capex", [0.0] * 16, 2021),
+              "cash": quarterly("cash", [0.0] * 16, 2021), "long_term_debt": quarterly("ltd", [0.0] * 16, 2021), "eps_diluted": quarterly("eps", [1.0] * 16, 2021)}
+    fund = compute_fundamental_metrics(series)
+    assert get(fund, "fcf_cagr_5y", "FY2024").value is None
+    facts = dei_facts([(date(2024, 12, 31), 10.0, "a")])
+    out = valuation.compute_valuation(series, facts, prices([(date(2024, 12, 31), 50.0)]), pd.DataFrame(columns=["accession", "form", "filed", "period_end"]),
+                                      date(2024, 12, 31), fund)
+    m = get(out, "dcf_base", "current")
+    assert m.value is not None and abs(m.inputs["growth"] - 0.10) < 1e-6
+
+
+def _base_series(n=8, first_fy=2022, **extra):
+    """Eight calendar quarters FY2022-FY2023; extra series must use the same years (quarterly() defaults to 2022)."""
+    s = {"revenue": quarterly("revenue", [100.0] * n, first_fy), "eps_diluted": quarterly("eps", [1.0] * n, first_fy),
+         "cash": quarterly("cash", [0.0] * n, first_fy), "long_term_debt": quarterly("ltd", [0.0] * n, first_fy)}
+    s.update(extra)
+    return s
+
+
+def _run(series, facts, as_of=date(2023, 12, 31), close=50.0):
+    fund = compute_fundamental_metrics(series)
+    return valuation.compute_valuation(series, facts, prices([(as_of, close)]), pd.DataFrame(columns=["accession", "form", "filed", "period_end"]), as_of, fund), fund
+
+
+def test_ttm_uses_metrics_table_for_composed_da():
+    series = _base_series(operating_income=quarterly("oi", [10.0] * 8), depreciation=quarterly("dep", [2.0] * 8))
+    out, _ = _run(series, dei_facts([(date(2023, 12, 31), 10.0, "a")]))
+    m = get(out, "ebitda_ttm", "current")
+    assert m.value == 48.0 and "da_composed" in m.flags
+    assert get(out, "ev_ebitda", "current").value == 500.0 / 48.0
+
+
+def test_dcf_uses_same_net_debt_fallback_as_ev():
+    series = _base_series(n=16, first_fy=2020, ocf=quarterly("ocf", [5.0] * 16, 2020), capex=quarterly("capex", [1.0] * 16, 2020))
+    del series["long_term_debt"]
+    series["cash"] = quarterly("cash", [20.0] * 16, 2020)
+    out, _ = _run(series, dei_facts([(date(2023, 12, 31), 10.0, "a")]))
+    assert get(out, "ev", "current").value == 480.0 and "no_debt_tag" in get(out, "ev", "current").flags
+    m = get(out, "dcf_base", "current")
+    assert m.value is not None and "no_debt_tag" in m.flags
+
+
+def test_shares_fallback_to_diluted_weighted():
+    series = _base_series(diluted_shares=quarterly("sh", [9.0] * 7 + [11.0]))
+    empty_dei = dei_facts([]).iloc[0:0]
+    out, _ = _run(series, empty_dei)
+    m = get(out, "shares_outstanding", "current")
+    assert m.value == 11.0 and "shares_diluted_weighted" in m.flags
+    assert get(out, "market_cap", "current").value == 550.0

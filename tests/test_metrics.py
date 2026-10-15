@@ -110,3 +110,22 @@ def test_net_buybacks_without_issuance_tag():
     s = hand_series(revenue={"FY2024": 1.0}, buybacks={"FY2024": 50.0})
     m = get(compute_fundamental_metrics(s), "net_buybacks", "FY2024")
     assert m.value == 50.0 and "no_issuance_data" in m.flags
+
+
+def test_da_composed_from_depreciation_and_amortization():
+    s = hand_series(revenue={"FY2024": 10.0}, operating_income={"FY2024": 3.0}, depreciation={"FY2024": 1.0}, amortization={"FY2024": 0.5})
+    m = get(compute_fundamental_metrics(s), "da", "FY2024")
+    assert m.value == 1.5 and "da_composed" in m.flags
+    assert get(compute_fundamental_metrics(s), "ebitda", "FY2024").value == 4.5
+    s2 = hand_series(revenue={"FY2024": 10.0}, depreciation={"FY2024": 1.0})
+    m2 = get(compute_fundamental_metrics(s2), "da", "FY2024")
+    assert m2.value == 1.0 and "depreciation_only" in m2.flags
+
+
+def test_total_debt_from_reported_total_tag():
+    s = hand_series(revenue={"FY2024": 1.0}, total_debt_reported={"FY2024": 50.0}, cash={"FY2024": 10.0})
+    m = get(compute_fundamental_metrics(s), "total_debt", "FY2024")
+    assert m.value == 50.0 and "debt_total_tag" in m.flags
+    assert get(compute_fundamental_metrics(s), "net_debt", "FY2024").value == 40.0
+    s2 = hand_series(revenue={"FY2024": 1.0}, total_debt_reported={"FY2024": 50.0}, long_term_debt={"FY2024": 30.0}, short_term_debt={"FY2024": 5.0})
+    assert get(compute_fundamental_metrics(s2), "total_debt", "FY2024").value == 35.0

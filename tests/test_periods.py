@@ -128,3 +128,30 @@ def test_insufficient_history_raises():
     df = pd.DataFrame([dict(base, start_date=date(2026, 4, 1), end_date=date(2026, 6, 30), value=1.0)])
     with pytest.raises(periods.InsufficientHistory):
         periods.build_series(df, {"revenue": ["Revenues"]})
+
+
+def test_costco_style_12_week_quarters_derive_from_ytd():
+    """12/12/12/16-week quarters: Q1 = 84 days, YTD6 = 168, YTD9 = 252, FY = 364."""
+    base = dict(taxonomy="us-gaap", tag="Revenues", unit="USD", fy=2025, fp="FY", form="10-K", accession="k", filed=date(2025, 10, 1))
+    rows = [
+        dict(base, form="10-Q", accession="q1", start_date=date(2024, 9, 2), end_date=date(2024, 11, 24), value=10.0),
+        dict(base, form="10-Q", accession="q2", start_date=date(2024, 9, 2), end_date=date(2025, 2, 16), value=25.0),
+        dict(base, form="10-Q", accession="q3", start_date=date(2024, 9, 2), end_date=date(2025, 5, 11), value=45.0),
+        dict(base, start_date=date(2024, 9, 2), end_date=date(2025, 8, 31), value=70.0),
+    ]
+    s = periods.build_series(pd.DataFrame(rows), {"revenue": ["Revenues"]})
+    vals = {r.period: (r.value, r.derived) for r in s["revenue"].itertuples()}
+    assert vals["Q2FY2025"] == (15.0, True) and vals["Q3FY2025"] == (20.0, True) and vals["Q4FY2025"] == (25.0, True)
+    assert periods.ttm(s["revenue"], date(2025, 8, 31)) == 70.0
+
+
+def test_fy_label_follows_company_convention():
+    """Home Depot's year ending 2026-02-01 is its 'fiscal 2025'; the 10-K's fy field carries that convention."""
+    base = dict(taxonomy="us-gaap", tag="Revenues", unit="USD", fp="FY", form="10-K", accession="k", filed=date(2026, 3, 20))
+    rows = [
+        dict(base, fy=2024, start_date=date(2024, 1, 29), end_date=date(2025, 2, 2), value=150.0),
+        dict(base, fy=2025, start_date=date(2025, 2, 3), end_date=date(2026, 2, 1), value=160.0),
+        dict(base, fy=2026, fp="Q1", form="10-Q", accession="q", filed=date(2026, 5, 20), start_date=date(2026, 2, 2), end_date=date(2026, 5, 3), value=40.0),
+    ]
+    s = periods.build_series(pd.DataFrame(rows), {"revenue": ["Revenues"]})
+    assert set(s["revenue"].period) == {"FY2024", "FY2025", "Q1FY2026"}
