@@ -6,7 +6,7 @@ import pandas as pd
 from fundabot.analytics import bounds, periods
 
 GROWTH_ITEMS = ["revenue", "gross_profit", "operating_income", "eps_diluted", "fcf"]
-PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped"}
+PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag"}
 NONPOS = object()  # sentinel: nonpositive denominator
 
 
@@ -173,9 +173,13 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
                            lambda v: _div(v["sbc"], v["revenue"])))
         out.append(combine("capex_to_da", p, "capex / da", {"capex": t.get("capex", p), "da": t.get("da", p)},
                            lambda v: _div(v["capex"], v["da"])))
-        out.append(combine("net_buybacks", p, "buybacks - share_issuance",
-                           {"buybacks": t.get("buybacks", p), "share_issuance": t.get("share_issuance", p)},
-                           lambda v: v["buybacks"] - v["share_issuance"], "USD"))
+        if t.get("buybacks", p) and t.get("share_issuance", p) is None:
+            out.append(combine("net_buybacks", p, "buybacks (no issuance data)", {"buybacks": t.get("buybacks", p)},
+                               lambda v: v["buybacks"], "USD", flags=["no_issuance_data"]))
+        else:
+            out.append(combine("net_buybacks", p, "buybacks - share_issuance",
+                               {"buybacks": t.get("buybacks", p), "share_issuance": t.get("share_issuance", p)},
+                               lambda v: v["buybacks"] - v["share_issuance"], "USD"))
         out.append(combine("dividend_coverage", p, "fcf / dividends_paid",
                            {"fcf": t.get("fcf", p), "dividends_paid": t.get("dividends_paid", p)},
                            lambda v: _div(v["fcf"], v["dividends_paid"])))

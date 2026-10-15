@@ -99,3 +99,9 @@ def test_roic_uses_clamped_tax_rate():
     )
     m = get(compute_fundamental_metrics(s), "roic", "FY2024")
     assert abs(m.value - 100 * (1 - 0.35) / 500) < 1e-9 and "tax_rate_clamped" in m.flags and "partial_debt" in m.flags
+
+
+def test_net_buybacks_without_issuance_tag():
+    s = hand_series(revenue={"FY2024": 1.0}, buybacks={"FY2024": 50.0})
+    m = get(compute_fundamental_metrics(s), "net_buybacks", "FY2024")
+    assert m.value == 50.0 and "no_issuance_data" in m.flags
