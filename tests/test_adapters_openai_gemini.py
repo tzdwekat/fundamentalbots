@@ -93,3 +93,31 @@ async def test_run_batch_budget_checks_whole_batch(db_conn, monkeypatch):
     with pytest.raises(base.BudgetExceeded):
         await base.run_batch(db_conn, "snap", [(a, "bull", "s", "u", schemas.AGENT_OUTPUT_SCHEMA) for a in adapters])
     assert sum(a.calls for a in adapters) == 0
+
+
+async def test_gemini_adapter_honors_retry_delay_and_serializes(monkeypatch):
+    import asyncio
+
+    from fundabot.agents.adapters import gemini as gmod
+
+    a = GeminiAdapter("gemini-3.8-flash")
+    attempts, sleeps, concurrent, peak = [], [], 0, 0
+
+    async def fake_generate(**kw):
+        nonlocal concurrent, peak
+        concurrent += 1
+        peak = max(peak, concurrent)
+        await asyncio.sleep(0)
+        concurrent -= 1
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED ... Please retry in 1.5s.")
+        return NS(text=json.dumps(GOOD), usage_metadata=NS(prompt_token_count=10, candidates_token_count=5, thoughts_token_count=0), candidates=[NS(finish_reason="STOP")])
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+    monkeypatch.setattr(a._client.aio.models, "generate_content", fake_generate)
+    monkeypatch.setattr(gmod.asyncio, "sleep", fake_sleep)
+    results = await asyncio.gather(*[a.complete("s", "u", schemas.AGENT_OUTPUT_SCHEMA) for _ in range(3)])
+    assert all(r.output == GOOD for r in results) and len(attempts) == 4
+    assert max(sleeps) >= 1.5 and peak == 1  # waited the server's retry delay; calls were serialized

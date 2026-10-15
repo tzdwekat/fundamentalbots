@@ -27,7 +27,20 @@ uv run fundabot metrics AAPL [--json]        # sourced metrics table (every valu
 uv run fundabot verify AAPL                  # cross-check 4 statement items against yfinance (diagnostic)
 uv run fundabot analyze NVDA AMD [--open]    # five persona agents on Claude -> reports/NVDA/<snapshot>.html
     --personas bull,bear  --model claude-sonnet-5-5  --force (refetch data)  --rerun (ignore cached analyses)
+    --providers anthropic,openai,gemini          # the same personas on more providers (one report, 10 or 15 agents)
+uv run fundabot analyze NVDA --full          # Phase 3: 5 personas x 3 providers, rebuttal round, 3 judges + reconcile,
+                                             #   scored verdict -> reports/NVDA/<snapshot>-full.html   (--judges 1 for one judge)
+uv run fundabot grid NVDA                    # persona x provider score grid with row/column spreads and hallucination rates
 ```
+
+Provider defaults: personas on `claude-sonnet-5-5`, `gpt-5.4`, `gemini-3.8-flash`; judges on `claude-opus-5-5`, `gpt-5.4`,
+`gemini-3.8-flash`. The Gemini key is on the free tier, so the Pro models return quota errors; switch the defaults in
+`fundabot/cli.py` (`JUDGE_MODELS`) and `agents/adapters/gemini.py` to `gemini-3.1-pro-preview` once billing is enabled.
+Every round is cached per snapshot: a repeated `--full` run on the same day costs $0; `--rerun` discards all rounds.
+
+Measured on 2026-10-15 for AAPL `--full` (Gemini column failed on free-tier limits, so 10 agents + 2 judges): $3.23 and
+166 seconds. Per provider: Sonnet 5.5 personas + rebuttals $1.25 (10 calls, 525k input tokens), GPT-5.4 personas, rebuttals and
+judge rounds $1.34 (12 calls), Opus 5.5 judge rounds $0.64 (2 calls, 101k input). With Gemini Pro on a paid key expect roughly $5-6.
 
 Keys: Phase 1 commands need none. `analyze` needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (embeddings).
 A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_ID` (Console -> Settings -> Workspaces).

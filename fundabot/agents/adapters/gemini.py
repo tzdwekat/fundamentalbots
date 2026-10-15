@@ -1,6 +1,7 @@
 """Google Gemini adapter: JSON output constrained by response_json_schema."""
 import asyncio
 import json
+import re
 import time
 
 from google import genai
@@ -14,7 +15,9 @@ PRICES = {  # USD per million tokens (input, output) for prompts <= 200k, ai.goo
     "gemini-3.8-flash": (0.75, 3.75),
     "gemini-2.5-pro": (1.25, 10.0),
 }
-RETRYABLE = ("429", "500", "502", "503", "504", "timeout", "deadline", "unavailable", "resource exhausted")
+RETRYABLE = ("429", "500", "502", "503", "504", "timeout", "deadline", "unavailable", "resource exhausted", "resource_exhausted")
+RETRY_IN = re.compile(r"retry in ([\d.]+)s", re.I)
+_lock = asyncio.Lock()  # free-tier quotas are per minute: one Gemini call in flight at a time
 
 
 class GeminiAdapter:
@@ -36,14 +39,16 @@ class GeminiAdapter:
         t0 = time.monotonic()
         config = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", response_json_schema=schema,
                                              max_output_tokens=self.max_tokens)
-        for attempt in range(4):
-            try:
-                r = await self._client.aio.models.generate_content(model=self.model, contents=user, config=config)
-                break
-            except Exception as e:  # the SDK raises several error classes; retry on transient ones only
-                if attempt == 3 or not any(k in str(e).lower() for k in RETRYABLE):
-                    raise
-                await asyncio.sleep(2 ** attempt)
+        async with _lock:
+            for attempt in range(5):
+                try:
+                    r = await self._client.aio.models.generate_content(model=self.model, contents=user, config=config)
+                    break
+                except Exception as e:  # the SDK raises several error classes; retry on transient ones only
+                    if attempt == 4 or not any(k in str(e).lower() for k in RETRYABLE):
+                        raise
+                    m = RETRY_IN.search(str(e))
+                    await asyncio.sleep(float(m.group(1)) + 1 if m else 15 * (attempt + 1))
         if not r.text:
             reason = getattr(r.candidates[0], "finish_reason", "?") if getattr(r, "candidates", None) else "no candidates"
             raise RuntimeError(f"gemini returned no text: {reason}")
