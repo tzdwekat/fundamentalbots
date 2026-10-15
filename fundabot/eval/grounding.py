@@ -5,7 +5,8 @@ from copy import deepcopy
 from fundabot.analytics.metrics import Metric
 from fundabot.retrieval.chunk import Chunk
 
-NUMBER = re.compile(r"(\$)?\s?(-?\d[\d,]*(?:\.\d+)?)\s?(%|(?:bn|billion|mm|million|thousand|trillion|tn|b|m|k|x)\b)?", re.I)
+# a minus counts only when not preceded by a digit, so "16-17%" is a range, not "-17%"
+NUMBER = re.compile(r"(\$)?\s?((?<!\d)-?\d[\d,]*(?:\.\d+)?)\s?(%|(?:bn|billion|mm|million|thousand|trillion|tn|b|m|k|x)\b)?", re.I)
 MULT = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6, "b": 1e9, "bn": 1e9, "billion": 1e9, "tn": 1e12, "trillion": 1e12}
 
 
@@ -24,20 +25,25 @@ def extract_numbers(text: str) -> list[tuple[str, float]]:
     return out
 
 
-def _close(a: float, b: float, is_pct: bool) -> bool:
-    if a == b:
-        return True
-    if is_pct and abs(a - b) <= 0.001:  # absolute floor for percentages: 0.1 point
-        return True
-    return b != 0 and abs(a - b) / abs(b) <= 0.01
+def _tolerance(text: str) -> float:
+    """Half a unit of the last quoted digit, in normalized terms: "0.25x" -> 0.005, "46.2%" -> 0.0005, "$2.5 billion" -> 5e7."""
+    m = NUMBER.search(text)
+    num, unit = m.group(2), (m.group(3) or "").lower()
+    decimals = len(num.split(".")[1]) if "." in num else 0
+    scale = 0.01 if unit == "%" else MULT.get(unit, 1.0)
+    return 0.5 * 10 ** (-decimals) * scale
+
+
+def _close(a: float, b: float, tol: float) -> bool:
+    return abs(a - b) <= tol or (b != 0 and abs(a - b) / abs(b) <= 0.01)
 
 
 def _supported(text: str, value: float, values: list[float], chunk_values: list[float]) -> bool:
-    """Within 1% of a shown metric, or equal to a number in a retrieved chunk (also as thousands/millions table units)."""
-    is_pct = text.endswith("%")
-    if any(_close(value, v, is_pct) for v in values):
+    """Within 1% (or the quoted precision) of a shown metric, or of a number in a retrieved chunk (also as thousands/millions table units)."""
+    tol = _tolerance(text)
+    if any(_close(value, v, tol) for v in values):
         return True
-    return any(_close(value, cv * mult, is_pct) for cv in chunk_values for mult in (1.0, 1e3, 1e6))
+    return any(_close(value, cv * mult, tol) for cv in chunk_values for mult in (1.0, 1e3, 1e6))
 
 
 def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions: list[str] = ()) -> dict:
@@ -67,8 +73,9 @@ def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions:
         (kept if c["evidence_resolved"] else dropped).append(c)
     g["claims"], g["dropped_claims"] = kept, dropped
     g["thesis_unsupported_numbers"] = check_numbers(g["thesis"])
-    g["risks_unsupported_numbers"] = [n for r in g["key_risks"] + g["what_would_change_my_mind"] for n in check_numbers(r)]
-    extra_total = len(extract_numbers(g["thesis"])) + sum(len(extract_numbers(r)) for r in g["key_risks"] + g["what_would_change_my_mind"])
+    # what_would_change_my_mind holds hypothetical thresholds, not quotes, so it is not number-checked
+    g["risks_unsupported_numbers"] = [n for r in g["key_risks"] for n in check_numbers(r)]
+    extra_total = len(extract_numbers(g["thesis"])) + sum(len(extract_numbers(r)) for r in g["key_risks"])
     n_total += extra_total
     n_unsupported += len(g["thesis_unsupported_numbers"]) + len(g["risks_unsupported_numbers"])
     g["stats"] = {"claims_total": len(output["claims"]), "claims_dropped": len(dropped), "numbers_total": n_total,

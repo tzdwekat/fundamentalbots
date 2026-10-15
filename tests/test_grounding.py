@@ -82,3 +82,27 @@ def test_chunk_number_matches_across_unit_formats():
 def test_filing_evidence_resolves():
     g = ground(out([claim("Late filer.", ["filing:acc-9"]), claim("x", ["filing:other"])]), METRICS, CHUNKS, accessions=["acc-9"])
     assert [c["text"] for c in g["claims"]] == ["Late filer."] and len(g["dropped_claims"]) == 1
+
+
+def test_ranges_are_not_negative_numbers():
+    ms = [Metric("revenue_yoy", "Q1FY2026", 0.157, "ratio", "x"), Metric("revenue_yoy", "Q2FY2026", 0.166, "ratio", "x"),
+          Metric("buybacks", "FY2024", 95e9, "USD", "x"), Metric("buybacks", "FY2021", 78e9, "USD", "x")]
+    assert [t for t, _ in extract_numbers("revenue up 16-17% YoY and buybacks of 78-95B")] == ["17%", "95B"] or \
+           [t for t, _ in extract_numbers("revenue up 16-17% YoY and buybacks of 78-95B")] == ["16", "17%", "78", "95B"]
+    g = ground(out([claim("revenue up 16-17% YoY and buybacks of 78-95B a year", ["metric:revenue_yoy@Q2FY2026"])]), ms, [])
+    assert g["claims"][0]["unsupported_numbers"] == []
+    assert [v for _, v in extract_numbers("fell -3.5% to -2.1B")] == [-0.035, -2.1e9]
+
+
+def test_rounded_quotes_match_at_quoted_precision():
+    ms = [Metric("net_debt_to_ebitda", "Q3FY2026", 0.2497, "ratio", "x"), Metric("accruals_ratio", "FY2025", 0.001483, "ratio", "x"),
+          Metric("dividend_coverage", "FY2025", 6.40, "ratio", "x")]
+    g = ground(out([claim("Net debt/EBITDA is 0.25x; accruals ratio 0.0015; dividend coverage 6x", ["metric:net_debt_to_ebitda@Q3FY2026"])]), ms, [])
+    assert g["claims"][0]["unsupported_numbers"] == []  # all within half a unit of the quoted precision
+
+
+def test_what_would_change_my_mind_is_exempt_from_number_checks():
+    o = out([claim("a", ["metric:revenue@FY2024"])], risks=["P/E above 99x"])
+    o["what_would_change_my_mind"] = ["FCF yield above 3.5%"]
+    g = ground(o, METRICS, CHUNKS)
+    assert g["risks_unsupported_numbers"] == ["99x"] and g["stats"]["numbers_total"] == 1

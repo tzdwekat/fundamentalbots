@@ -33,8 +33,9 @@ Keys: Phase 1 commands need none. `analyze` needs `ANTHROPIC_API_KEY` and `OPENA
 A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_ID` (Console -> Settings -> Workspaces).
 
 Costs: every model call is logged in `model_calls` with tokens and USD; `FUNDABOT_MONTHLY_BUDGET_USD` is a hard cap
-(the adapter refuses calls once the month's logged spend reaches it). Fill in measured per-ticker cost here after the
-first real run.
+(the adapter refuses calls once the month's logged spend reaches it). Measured on 2026-10-15 for AAPL, five personas on
+`claude-sonnet-5-5`: about 84k input and 2.5-3.6k output tokens per persona, $0.98 per ticker, 2 minutes wall time
+(personas run sequentially). Embeddings for a ticker's 13 filings: about $0.006 once. A re-run on the same snapshot costs $0.
 
 ## What the report contains
 
