@@ -44,16 +44,29 @@ def create_snapshot(conn, ticker, cik, fetch_id, accessions, price_date, latest_
     return sid
 
 
-def latest_for(conn, ticker: str) -> dict | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT id, ticker, cik, companyfacts_fetch_id, accessions, price_date, latest_close, shares_outstanding, code_sha, created_at "
-                    "FROM snapshots WHERE ticker = %s ORDER BY created_at DESC LIMIT 1", (ticker.upper(),))
-        row = cur.fetchone()
+_COLS = "id, ticker, cik, companyfacts_fetch_id, accessions, price_date, latest_close, shares_outstanding, code_sha, created_at"
+
+
+def _row_to_dict(row) -> dict | None:
     if row is None:
         return None
-    keys = ["id", "ticker", "cik", "companyfacts_fetch_id", "accessions", "price_date", "latest_close", "shares_outstanding", "code_sha", "created_at"]
-    d = dict(zip(keys, row))
+    d = dict(zip(_COLS.split(", "), row))
     d["latest_close"] = None if d["latest_close"] is None else float(d["latest_close"])
+    return d
+
+
+def latest_for(conn, ticker: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_COLS} FROM snapshots WHERE ticker = %s ORDER BY created_at DESC LIMIT 1", (ticker.upper(),))
+        return _row_to_dict(cur.fetchone())
+
+
+def load(conn, sid: str) -> dict:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {_COLS} FROM snapshots WHERE id = %s", (sid,))
+        d = _row_to_dict(cur.fetchone())
+    if d is None:
+        raise KeyError(f"snapshot {sid} not found")
     return d
 
 
