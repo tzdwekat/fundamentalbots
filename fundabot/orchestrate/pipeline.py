@@ -72,10 +72,11 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
 
 async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], adapter, embedder, force: bool = False, rerun: bool = False,
                   out_dir: Path = Path("reports")) -> Path:
-    """Full Phase 2 run. Returns the HTML report path. Cached analyses are reused unless rerun=True."""
-    from fundabot.agents.runner import run_personas
-    from fundabot.eval.grounding import ground
+    """Phase 2 run over one or more providers. `adapter` may be one Adapter or a list. Cached analyses are reused unless rerun=True."""
+    from fundabot.agents.runner import run_grid
     from fundabot.report.render import render_report
+
+    adapters = adapter if isinstance(adapter, list) else [adapter]
     from fundabot.retrieval.query import embed_missing, load_chunks
 
     sid = prepare(conn, ticker, force=force)
@@ -83,17 +84,12 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     embed_missing(conn, embedder, s["accessions"])
     if rerun:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM analyses WHERE snapshot_id = %s AND provider = %s AND model = %s", (sid, adapter.provider, adapter.model))
+            for a in adapters:
+                cur.execute("DELETE FROM analyses WHERE snapshot_id = %s AND provider = %s AND model = %s", (sid, a.provider, a.model))
         conn.commit()
-    analyses = await run_personas(conn, sid, personas, adapter, embedder)
+    analyses = await run_grid(conn, sid, personas, adapters, embedder)  # grounded inside run_grid
     metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
     chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
-    for a in analyses:
-        a["grounded"] = ground(a["output"], metrics, [chunks_by_id[c] for c in a["chunk_ids"] if c in chunks_by_id], s["accessions"])
-        with conn.cursor() as cur:
-            cur.execute("UPDATE analyses SET grounded = %s WHERE snapshot_id = %s AND persona = %s AND provider = %s AND model = %s",
-                        (Jsonb(a["grounded"]), sid, a["persona"], a["provider"], a["model"]))
-    conn.commit()
     with conn.cursor() as cur:
         cur.execute("SELECT accession, form, filed FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (s["accessions"],))
         filings = [dict(zip(["accession", "form", "filed"], r)) for r in cur.fetchall()]
