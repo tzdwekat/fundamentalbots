@@ -121,3 +121,10 @@ def test_q2_q3_derived_from_ytd(aapl):
     assert q3.value == ytd9 - ytd6
     assert row(aapl, "ocf", "Q4FY2024").value == row(aapl, "ocf", "FY2024").value - ytd9
     assert periods.ttm(aapl["ocf"], date(2024, 9, 28)) == row(aapl, "ocf", "FY2024").value
+
+
+def test_insufficient_history_raises():
+    base = dict(taxonomy="us-gaap", tag="Revenues", unit="USD", fy=2026, fp="Q2", form="10-Q", accession="q", filed=date(2026, 8, 1))
+    df = pd.DataFrame([dict(base, start_date=date(2026, 4, 1), end_date=date(2026, 6, 30), value=1.0)])
+    with pytest.raises(periods.InsufficientHistory):
+        periods.build_series(df, {"revenue": ["Revenues"]})

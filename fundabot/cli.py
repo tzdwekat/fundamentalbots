@@ -25,7 +25,11 @@ def ingest(tickers: list[str]):
 
     conn = connect()
     for t in tickers:
-        typer.echo(f"{t.upper()}: snapshot {prepare(conn, t)}")
+        try:
+            typer.echo(f"{t.upper()}: snapshot {prepare(conn, t)}")
+        except Exception as e:  # keep going; one bad ticker must not stop a batch
+            conn.rollback()
+            typer.echo(f"{t.upper()}: ERROR {type(e).__name__}: {e}", err=True)
 
 
 @app.command()
@@ -39,8 +43,7 @@ def metrics(ticker: str, json_out: bool = typer.Option(False, "--json"), force: 
     from fundabot.report.table import format_table
 
     conn = connect()
-    snap = None if force else snapshot.latest_for(conn, ticker)
-    sid = snap["id"] if snap else prepare(conn, ticker, force=force)
+    sid = prepare(conn, ticker, force=force)
     ms = snapshot.load_metrics(conn, sid)
     if json_out:
         typer.echo(json.dumps([m.to_dict() for m in ms], default=str))
@@ -60,8 +63,7 @@ def verify(ticker: str):
     from fundabot.report.verify import cross_check
 
     conn = connect()
-    snap = snapshot.latest_for(conn, ticker)
-    sid = snap["id"] if snap else prepare(conn, ticker)
+    sid = prepare(conn, ticker)
     typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
 
 

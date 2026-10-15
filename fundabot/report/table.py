@@ -27,7 +27,7 @@ def fmt(m: Metric) -> str:
         s = f"{v / 1e6:,.0f}M"
     elif m.unit == "USD/share":
         s = f"{v:,.2f}"
-    elif m.metric_id.endswith(("_margin", "_yoy", "_cagr_3y", "_cagr_5y", "_yield", "_to_assets", "_to_revenue", "_percentile", "_growth")) or m.metric_id in ("roe", "roa", "roic", "accruals_ratio"):
+    elif any(k in m.metric_id for k in ("margin", "yoy", "cagr", "yield", "to_assets", "to_revenue", "percentile", "growth")) or m.metric_id in ("roe", "roa", "roic", "accruals_ratio"):
         s = f"{v:.1%}"
     else:
         s = f"{v:,.2f}"

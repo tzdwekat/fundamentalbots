@@ -38,3 +38,6 @@ packages = ["fundabot"]
 markers = ["db: needs a reachable Postgres at DATABASE_URL"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }]

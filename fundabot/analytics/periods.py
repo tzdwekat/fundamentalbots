@@ -15,6 +15,10 @@ import yaml
 
 PERIODIC_FORMS = {"10-K", "10-K/A", "10-Q", "10-Q/A"}
 TAG_MAP_PATH = Path(__file__).parent / "tag_map.yaml"
+class InsufficientHistory(ValueError):
+    pass
+
+
 COLUMNS = ["period", "fy", "fq", "start", "end", "value", "accession", "tag", "restated", "derived"]
 
 
@@ -66,7 +70,7 @@ def fiscal_year_end(facts: pd.DataFrame, tag_map: dict[str, list[str]]) -> tuple
             continue
         end = ann.end_date.max()
         return end.month, end.day
-    raise ValueError("no annual facts found")
+    raise InsufficientHistory("no annual 10-K facts in companyfacts (new registrant CIK, or not a 10-K filer)")
 
 
 def _safe_date(y: int, m: int, d: int) -> date:
