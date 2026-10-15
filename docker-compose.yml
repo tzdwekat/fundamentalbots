@@ -1,0 +1,19 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: fundabot
+      POSTGRES_PASSWORD: fundabot
+      POSTGRES_DB: fundabot
+    ports:
+      - "5433:5432"
+    volumes:
+      - fundabot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fundabot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  fundabot_pgdata:
