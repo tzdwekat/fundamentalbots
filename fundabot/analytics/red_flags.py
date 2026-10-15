@@ -1,7 +1,14 @@
 """Rules-only red flags. Numeric rules here; text and filing-list rules added by edgar_filings ingest."""
+import re
 from dataclasses import dataclass, field, asdict
+from datetime import timedelta
+
+import pandas as pd
 
 from fundabot.analytics.metrics import Metric
+
+GOING_CONCERN = re.compile(r"substantial doubt.{0,300}going concern|going concern.{0,300}substantial doubt", re.I | re.S)
+GOING_CONCERN_ITEMS = ("item7", "item8", "item9a")  # not 1A: risk factors carry boilerplate
 
 
 @dataclass
@@ -35,4 +42,20 @@ def numeric_flags(metrics: list[Metric]) -> list[RedFlag]:
     if gw and gw[-1].value > 0.5:
         flags.append(RedFlag("goodwill_heavy", "medium", [f"metric:goodwill_to_assets@{gw[-1].period}"],
                              f"goodwill is {gw[-1].value:.0%} of total assets in {gw[-1].period}"))
+    return flags
+
+
+def text_flags(accession: str, sections: dict[str, str], filings: pd.DataFrame) -> list[RedFlag]:
+    """Going-concern language in the latest 10-K's MD&A/financials/controls; NT 10-K/10-Q filings in the last 2 years."""
+    flags = []
+    for item in GOING_CONCERN_ITEMS:
+        if item in sections and GOING_CONCERN.search(sections[item]):
+            flags.append(RedFlag("going_concern", "high", [f"chunk:{accession}#{item}-0"], f"going-concern language in {item} of {accession}"))
+            break
+    if len(filings):
+        cutoff = filings.filed.max() - timedelta(days=730)
+        late = filings[filings.form.str.startswith("NT 10-") & (filings.filed >= cutoff)]
+        if len(late):
+            flags.append(RedFlag("late_filing", "medium", [f"filing:{a}" for a in late.accession],
+                                 f"{len(late)} late-filing notice(s) (NT 10-K/10-Q) in the last 2 years"))
     return flags

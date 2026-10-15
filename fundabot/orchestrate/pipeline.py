@@ -38,11 +38,15 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
 
     filings = edgar_filings.list_filings(cik)
     accessions = edgar_filings.select_for_snapshot(filings)
+    edgar_filings.ingest(conn, cik, filings, accessions, filings.attrs.get("name", ""))
 
     series = periods.build_series(facts, periods.load_tag_map())
     fundamentals = compute_fundamental_metrics(series)
     val = valuation.compute_valuation(series, facts, prices_df, filings, as_of, fundamentals)
     flags = red_flags.numeric_flags(fundamentals)
+    latest_10k = next((a for a in accessions if filings[filings.accession == a].form.iloc[0] == "10-K"), None)
+    if latest_10k:
+        flags += red_flags.text_flags(latest_10k, edgar_filings.load_sections(conn, latest_10k), filings)
 
     cur = {m.metric_id: m for m in val if m.period == "current"}
     close = cur["price"].value if "price" in cur else None

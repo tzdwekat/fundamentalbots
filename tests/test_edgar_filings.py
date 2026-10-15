@@ -35,3 +35,17 @@ def test_parse_submissions():
     assert list(df.columns) == ["accession", "form", "filed", "period_end", "primary_doc_url"]
     assert df.iloc[0].period_end == date(2025, 9, 27) and pd.isna(df.iloc[1].period_end)
     assert df.iloc[0].primary_doc_url == "https://www.sec.gov/Archives/edgar/data/320193/000032019325000073/aapl-20250927.htm"
+
+
+def test_item_key_normalization():
+    assert edgar_filings.normalize_item_key("Item 1A") == "item1a"
+    assert edgar_filings.normalize_item_key("Item 7") == "item7"
+    assert edgar_filings.normalize_item_key("Part II, Item 1A") == "p2item1a"
+    assert edgar_filings.normalize_item_key("Part I, Item 2") == "p1item2"
+
+
+def test_wanted_items_filter():
+    assert edgar_filings.wanted_items("10-K", ["Item 1", "Item 1A", "Item 2", "Item 7", "Item 7A", "Item 8", "Item 9A", "Item 15"]) == \
+        {"Item 1": "item1", "Item 1A": "item1a", "Item 7": "item7", "Item 7A": "item7a", "Item 8": "item8", "Item 9A": "item9a"}
+    assert edgar_filings.wanted_items("10-Q", ["Part I, Item 1", "Part I, Item 2", "Part II, Item 1A", "Part II, Item 6"]) == \
+        {"Part I, Item 2": "p1item2", "Part II, Item 1A": "p2item1a"}

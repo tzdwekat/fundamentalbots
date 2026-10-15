@@ -28,3 +28,37 @@ def test_goodwill_heavy():
 def test_none_inputs_skip():
     assert numeric_flags([m("accruals_ratio", "FY2024", None), m("goodwill_to_assets", "FY2024", None)]) == []
     assert isinstance(RedFlag("x", "high", [], ""), RedFlag)
+
+
+from datetime import date
+from pathlib import Path
+
+import pandas as pd
+
+from fundabot.analytics.red_flags import text_flags
+
+FIX = Path(__file__).parent / "fixtures" / "sections"
+
+
+def filings_df(rows):
+    return pd.DataFrame(rows, columns=["accession", "form", "filed", "period_end", "primary_doc_url"])
+
+
+def test_going_concern_regex():
+    neg = {"item7": (FIX / "aapl_10k_item7.txt").read_text(), "item1a": (FIX / "aapl_10k_item1a.txt").read_text()}
+    assert text_flags("acc-1", neg, filings_df([])) == []
+    pos = {"item7": "Management has concluded that there is substantial doubt about the Company's ability to continue as a going concern."}
+    flags = text_flags("acc-1", pos, filings_df([]))
+    assert [f.flag_id for f in flags] == ["going_concern"] and flags[0].severity == "high"
+    assert flags[0].evidence == ["chunk:acc-1#item7-0"]
+    pos2 = {"item9a": "...ability to continue as a going concern. These conditions raise substantial doubt..."}
+    assert [f.flag_id for f in text_flags("acc-1", pos2, filings_df([]))] == ["going_concern"]
+    assert text_flags("acc-1", {"item1a": "substantial doubt ... going concern"}, filings_df([])) == []  # risk-factor boilerplate ignored
+
+
+def test_late_filing_flag():
+    df = filings_df([("a", "10-K", date(2026, 3, 1), None, ""), ("b", "NT 10-Q", date(2025, 8, 1), None, ""), ("c", "NT 10-K", date(2023, 1, 1), None, "")])
+    flags = text_flags("a", {}, df)
+    assert [f.flag_id for f in flags] == ["late_filing"] and flags[0].severity == "medium"
+    assert flags[0].evidence == ["filing:b"]
+    assert text_flags("a", {}, df[df.accession != "b"]) == []  # the 2023 one is older than 2 years
