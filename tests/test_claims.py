@@ -6,7 +6,7 @@ from fundabot.retrieval.embed import FakeEmbedder
 
 def analysis(persona, provider, score, texts, direction="positive", weight=3):
     return {"persona": persona, "provider": provider, "agent": f"{persona}/{provider}", "model": "m",
-            "grounded": {"score": score, "confidence": 0.5,
+            "grounded": {"score": score, "confidence": 0.5, "thesis": f"{persona} thesis",
                          "claims": [{"text": t, "evidence": ["metric:revenue@FY2024"], "direction": direction, "weight": weight, "evidence_resolved": True, "unsupported_numbers": []} for t in texts]}}
 
 
