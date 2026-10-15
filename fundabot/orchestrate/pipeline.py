@@ -96,3 +96,59 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     _, html = render_report(ticker, s, metrics, flags, analyses, chunks_by_id, filings, out_dir)
     log.info("%s: report %s", ticker, html)
     return html
+
+
+async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str], adapters: list, judges: list, embedder,
+                       force: bool = False, rerun: bool = False, out_dir: Path = Path("reports")) -> Path:
+    """Grid -> rebuttal -> three judges + reconcile -> scoring -> verdict report. Every round is cached per snapshot."""
+    from fundabot.agents.runner import run_grid
+    from fundabot.debate import claims, judge, rebuttal, scoring
+    from fundabot.report.render import render_verdict
+    from fundabot.retrieval.query import embed_missing, load_chunks
+
+    sid = prepare(conn, ticker, force=force)
+    s = snapshot.load(conn, sid)
+    embed_missing(conn, embedder, s["accessions"])
+    if rerun:
+        with conn.cursor() as cur:
+            for table in ("analyses", "rebuttals", "judgements", "verdicts"):
+                cur.execute(f"DELETE FROM {table} WHERE snapshot_id = %s", (sid,))
+        conn.commit()
+
+    analyses = await run_grid(conn, sid, personas, adapters, embedder)
+    metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
+    chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
+    accessions = s["accessions"]
+
+    def resolvable(eid: str) -> bool:
+        return eid in claims.evidence_text([eid], metrics, chunks_by_id, accessions)
+
+    pool = claims.build_pool(analyses)
+    rebuttals = await rebuttal.run_rebuttals(conn, sid, analyses, pool, {a.provider: a for a in adapters}, embedder, metrics, chunks_by_id, accessions)
+    pool, revised = rebuttal.apply_rebuttals(pool, rebuttals, resolvable)
+    for a in analyses:
+        revised.setdefault(a["agent"], (a["grounded"]["score"], a["grounded"]["confidence"]))
+
+    judged = judge.precheck(pool, resolvable)
+    ids = sorted({e for c in judged for e in c["evidence"]} | {e for c in judged for r in c["refutations"] for e in r["evidence"]})
+    earnings_available = any("vendor_fmp" in m.flags and m.value is not None for m in metrics)
+    message = judge.build_message(judged, flags, metrics, earnings_available, claims.evidence_text(ids, metrics, chunks_by_id, accessions), revised)
+    round1 = await judge.run_judges(conn, sid, judges, message)
+    reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(judges) > 1 else round1
+    means = judge.mean_scores(reconciled, [c["id"] for c in judged])
+    implied = [scoring.implied_composite(judged, j["output"], revised) for j in reconciled]
+    cells = {(a["persona"], a["provider"]): {"score": a["grounded"]["score"], "confidence": a["grounded"]["confidence"],
+                                             "hallucination_rate": a["grounded"]["stats"]["hallucination_rate"], "model": a["model"]} for a in analyses}
+    catalysts = claims.dedupe([c for j in reconciled for c in j["output"]["catalysts"]], embedder, key="what")
+    verdict = scoring.build_verdict(ticker.upper(), sid, judged, revised, means, reconciled, implied, cells, catalysts, [f.to_dict() for f in flags])
+    verdict["providers"] = [a.provider for a in adapters]
+    verdict["judges"] = [{"provider": j["provider"], "model": j["model"]} for j in reconciled]
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO verdicts (snapshot_id, run_kind, verdict) VALUES (%s, 'full', %s) ON CONFLICT (snapshot_id, run_kind) DO UPDATE SET verdict = EXCLUDED.verdict, created_at = now()",
+                    (sid, Jsonb(verdict)))
+        cur.execute("SELECT accession, form, filed FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (accessions,))
+        filings = [dict(zip(["accession", "form", "filed"], r)) for r in cur.fetchall()]
+    conn.commit()
+    _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir)
+    log.info("%s: verdict %s composite %s", ticker, html, verdict["composite_score"])
+    return html

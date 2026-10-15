@@ -41,7 +41,9 @@ Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
 {% if a.grounded.risks_unsupported_numbers %}
 > ⚠ unsupported numbers in risks: {{ a.grounded.risks_unsupported_numbers|join(", ") }}
 {% endif %}
-Grounding: {{ a.grounded.stats.claims_total }} claims, {{ a.grounded.stats.claims_dropped }} dropped, hallucination rate {{ "%.0f"|format(a.grounded.stats.hallucination_rate * 100) }}% ({{ a.grounded.stats.numbers_unsupported }}/{{ a.grounded.stats.numbers_total }} numbers). Retrieved chunks: {% for cid in a.chunk_ids %}`chunk:{{ cid }}`{{ ", " if not loop.last }}{% endfor %}
+{% if a.rebuttal %}**Rebuttal:** revised score {{ a.rebuttal.revised_score }} (confidence {{ a.rebuttal.revised_confidence }}){% for r in a.rebuttal.responses %}; {{ r.verdict }} `{{ r.claim_id }}`: {{ r.reason }}{% endfor %}{% if a.rebuttal.withdraws %}; withdraws {% for w in a.rebuttal.withdraws %}`{{ w }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}
+
+{% endif %}Grounding: {{ a.grounded.stats.claims_total }} claims, {{ a.grounded.stats.claims_dropped }} dropped, hallucination rate {{ "%.0f"|format(a.grounded.stats.hallucination_rate * 100) }}% ({{ a.grounded.stats.numbers_unsupported }}/{{ a.grounded.stats.numbers_total }} numbers). Retrieved chunks: {% for cid in a.chunk_ids %}`chunk:{{ cid }}`{{ ", " if not loop.last }}{% endfor %}
 
 {% endfor %}
 ## Metrics

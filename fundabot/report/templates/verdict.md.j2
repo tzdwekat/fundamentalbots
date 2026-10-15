@@ -1,0 +1,70 @@
+# {{ ticker }} verdict
+
+snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · providers {{ verdict.providers|join(", ") }} · judges {% for j in verdict.judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% endfor %}
+
+## Summary (median judge: {{ verdict.median_judge }})
+
+{{ verdict.one_paragraph_summary }}
+
+**Composite score: {{ verdict.composite_score }}** ({{ verdict.weighting }}{% if verdict.veto_note %}; {{ verdict.veto_note }}; uncapped {{ verdict.composite_uncapped }}{% endif %}) · dispersion {{ verdict.dispersion }} · **Judge agreement: {{ verdict.judge_agreement }}** (implied composites: {% for p, v in verdict.implied_composites.items() %}{{ p }} {{ v }}{{ ", " if not loop.last }}{% endfor %})
+
+| sub-score | 0–100 |
+|---|---|
+| quality | {{ verdict.quality_score }} |
+| value | {{ verdict.value_score }} |
+| earnings momentum | {{ verdict.earnings_momentum_score }} |
+| accounting risk | {{ verdict.accounting_risk_score }} |
+
+## Score grid (score / confidence / unsupported numbers)
+
+| persona | {{ verdict.providers|join(" | ") }} | spread |
+|---|{% for _ in verdict.providers %}---|{% endfor %}---|
+{% for persona in personas %}| {{ persona }} | {% for pr in verdict.providers %}{% set c = verdict.grid.get(persona ~ "/" ~ pr) %}{% if c %}{{ c.score }} / {{ "%.2f"|format(c.confidence) }} / {{ "%.0f"|format(c.hallucination_rate * 100) }}%{% else %}failed{% endif %} | {% endfor %}{{ "%.2f"|format(verdict.dispersion_by_persona.get(persona, 0)) }} |
+{% endfor %}| spread | {% for pr in verdict.providers %}{{ "%.2f"|format(verdict.dispersion_by_provider.get(pr, 0)) }} | {% endfor %} |
+
+Revised scores after rebuttal: {% for a, s in verdict.revised_scores|dictsort %}{{ a }} {{ s }}{{ ", " if not loop.last }}{% endfor %}. Agent weights: {% for a, w in verdict.agent_weights|dictsort %}{{ a }} {{ w }}{{ ", " if not loop.last }}{% endfor %}.
+
+## Most contested claims
+
+{% for c in verdict.contested_claims[:3] %}
+**{{ c.id }}** ({{ c.direction }}, weight {{ c.weight }}; judges: strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}, spread {{ c.judge.spread }}): {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% for r in c.refutations %}
+- refuted by {{ r.by }}: {{ r.reason }} — {% for e in r.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}{% if c.conceded_by %}
+- conceded by {{ c.conceded_by|join(", ") }}
+{% endif %}{% for n in c.judge.notes %}
+- judge: {{ n }}
+{% endfor %}
+{% else %}
+None: no claim was refuted and the judges agreed on every claim.
+{% endfor %}
+
+## Consensus claims
+
+{% for c in verdict.consensus_claims %}- ({{ c.direction }}, strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}) {{ c.text }} — `{{ c.id }}`{% if c.conceded_by %}, conceded by {{ c.conceded_by|join(", ") }}{% endif %}
+{% else %}None met the bar (strength ≥ 3, materiality ≥ 3, unrefuted).
+{% endfor %}
+
+## Red flags
+
+{% for f in verdict.red_flags %}- **{{ f.flag_id }}** [{{ f.severity }}]: {{ f.detail }}
+{% else %}None from the rules engine.
+{% endfor %}
+
+## Catalysts
+
+{% for c in verdict.catalysts %}- {{ c.what }} ({{ c.when }}) — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% else %}None cited.
+{% endfor %}
+
+## Earnings signals (consensus, FMP)
+
+{% for line in earnings_lines %}- `{{ line }}`
+{% else %}Consensus data unavailable for this company.
+{% endfor %}
+
+## Judge summaries
+
+{% for p, text in verdict.summaries.items() %}**{{ p }}:** {{ text }}
+
+{% endfor %}

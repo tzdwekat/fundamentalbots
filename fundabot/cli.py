@@ -125,26 +125,33 @@ def grid(ticker: str):
     typer.echo(grid_table(conn, snap["id"]))
 
 
+JUDGE_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-5.4", "gemini": None}  # None = the adapter's default
+
+
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
-            providers: str = "anthropic", open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False,
-            out_dir: str = "reports"):
-    """Run the persona agents over a fresh snapshot and write a Markdown + HTML report."""
+            providers: str = "anthropic", full: bool = False, judges: int = 3,
+            open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
+    """Run the persona agents over a fresh snapshot and write a report. --full: 3 providers, rebuttal round, judges, verdict."""
     import asyncio
     import webbrowser
     from pathlib import Path
 
     from fundabot.db.session import connect
-    from fundabot.orchestrate.pipeline import analyze as run
+    from fundabot.orchestrate.pipeline import analyze as run, analyze_full
     from fundabot.retrieval.embed import OpenAIEmbedder
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    provider_names = [p.strip() for p in providers.split(",") if p.strip()]
+    provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
     adapters = [make_adapter(p, model if p == "anthropic" else None) for p in provider_names]
+    judge_adapters = [make_adapter(p, JUDGE_MODELS[p]) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
     for t in tickers:
         try:
-            html = asyncio.run(run(conn, t, names, adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
+            if full:
+                html = asyncio.run(analyze_full(conn, t, names, adapters, judge_adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
+            else:
+                html = asyncio.run(run(conn, t, names, adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
             typer.echo(f"{t.upper()}: {html}")
             if open_report:
                 webbrowser.open(html.resolve().as_uri())

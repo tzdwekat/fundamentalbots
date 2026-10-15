@@ -15,6 +15,29 @@ CSS = "body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1100p
       "th:first-child,td:first-child{text-align:left}code{background:#f4f4f4;padding:1px 3px}blockquote{color:#a40;border-left:3px solid #a40;padding-left:.6em}"
 
 
+def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir: Path) -> tuple[Path, Path]:
+    """Verdict sections, then the per-agent report (15 agents with their rebuttals) and the sources appendix."""
+    from fundabot.agents.context import metric_line
+    from fundabot.agents.runner import PERSONA_ORDER
+
+    earnings_lines = [metric_line(m) for m in metrics if "vendor_fmp" in m.flags and m.value is not None]
+    head = ENV.get_template("verdict.md.j2").render(ticker=ticker.upper(), snapshot=snapshot, verdict=verdict, personas=PERSONA_ORDER, earnings_lines=earnings_lines)
+    by_agent = {r["agent"]: r["output"] for r in rebuttals}
+    for a in analyses:
+        a["rebuttal"] = by_agent.get(a["agent"])
+    body_md, _ = render_report(ticker, snapshot, metrics, flags, analyses, chunks_by_id, filings, out_dir)
+    body = body_md.read_text().split("\n", 1)[1]
+    body_md.unlink()
+    body_md.with_suffix(".html").unlink(missing_ok=True)
+    md = head + "\n---\n# Agent detail\n" + body
+    out = out_dir / ticker.upper()
+    md_path, html_path = out / f"{snapshot['id']}-full.md", out / f"{snapshot['id']}-full.html"
+    md_path.write_text(md)
+    html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>{ticker.upper()} verdict</title><style>{CSS}</style></head><body>"
+                         f"{markdown.markdown(md, extensions=['tables'])}</body></html>")
+    return md_path, html_path
+
+
 def _cited_ids(analyses: list[dict]) -> tuple[set[str], set[str]]:
     metric_ids, chunk_ids = set(), set()
     for a in analyses:
