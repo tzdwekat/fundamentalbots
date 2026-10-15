@@ -191,3 +191,11 @@ def test_shares_outstanding_carries_split_flag():
     adj = periods.adjust_for_splits(facts, pd.DataFrame({"date": [date(2020, 8, 31)], "ratio": [4.0]}))
     sh = valuation.shares_outstanding(adj)
     assert sh.shares.tolist() == [400.0, 400.0] and sh.split_adjusted.tolist() == [True, False]
+
+
+def test_quarter_balance_ratio_uses_composed_da_and_flags():
+    series = _base_series(operating_income=quarterly("oi", [10.0] * 8), depreciation=quarterly("dep", [2.0] * 8),
+                          long_term_debt=quarterly("ltd", [100.0] * 8), cash=quarterly("cash", [4.0] * 8))
+    fund = compute_fundamental_metrics(series)
+    m = get(fund, "net_debt_to_ebitda", "Q4FY2023")
+    assert m.value == 96.0 / 48.0 and "da_composed" in m.flags and m.inputs["ebitda"]["item"] == "ebitda_ttm"

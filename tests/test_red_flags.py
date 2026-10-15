@@ -62,3 +62,13 @@ def test_late_filing_flag():
     assert [f.flag_id for f in flags] == ["late_filing"] and flags[0].severity == "medium"
     assert flags[0].evidence == ["filing:b"]
     assert text_flags("a", {}, df[df.accession != "b"]) == []  # the 2023 one is older than 2 years
+
+
+def test_going_concern_negation_ignored_and_sentence_in_detail():
+    neg = {"item7": "Management concluded that there is no substantial doubt about the Company's ability to continue as a going concern."}
+    assert text_flags("a", neg, filings_df([])) == []
+    neg2 = {"item8": "These conditions do not raise substantial doubt about our ability to continue as a going concern."}
+    assert text_flags("a", neg2, filings_df([])) == []
+    pos = {"item8": "Intro text. These conditions raise substantial doubt about the Company's ability to continue as a going concern within one year. Next."}
+    flags = text_flags("a", pos, filings_df([]))
+    assert len(flags) == 1 and "raise substantial doubt" in flags[0].detail

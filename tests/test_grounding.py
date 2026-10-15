@@ -57,3 +57,28 @@ def test_extract_numbers_normalization():
     assert [v for _, v in extract_numbers("$391,035 million")] == [391035e6]
     assert [v for _, v in extract_numbers("46.2%")] == [0.462]
     assert [v for _, v in extract_numbers("1.2x and 3.5bn and 700k")] == [1.2, 3.5e9, 700e3]
+
+
+def test_percentage_not_matched_loosely():
+    ms = [Metric(f"ratio{i}", "FY2024", i / 100, "ratio", "x") for i in range(0, 100)]  # 0.00, 0.01, ... 0.99
+    g = ground(out([claim("margin of 23.4%", ["metric:ratio5@FY2024"])]), ms, [])
+    assert g["claims"][0]["unsupported_numbers"] == ["23.4%"]
+    g2 = ground(out([claim("margin of 25.0%", ["metric:ratio5@FY2024"])]), ms, [])
+    assert g2["claims"][0]["unsupported_numbers"] == []
+
+
+def test_values_limited_to_shown_periods():
+    ms = [Metric("revenue", f"FY{y}", 1.0, "USD", "x") for y in range(2015, 2026)] + [Metric("revenue", "FY2010", 420e9, "USD", "x")]
+    g = ground(out([claim("revenue of $420 billion", ["metric:revenue@FY2025"])]), ms, [])
+    assert g["claims"][0]["unsupported_numbers"] == ["$420 billion"]
+
+
+def test_chunk_number_matches_across_unit_formats():
+    chunks = [Chunk("a#item7-0", "a", "item7", 0, "We repurchased $2.5 billion of stock. Net sales were 2,500 and 1,234 (in millions).", 20)]
+    g = ground(out([claim("Buybacks of $2.5B and sales of $2,500 million and $1.234 billion", ["chunk:a#item7-0"])]), METRICS, chunks)
+    assert g["claims"][0]["unsupported_numbers"] == []
+
+
+def test_filing_evidence_resolves():
+    g = ground(out([claim("Late filer.", ["filing:acc-9"]), claim("x", ["filing:other"])]), METRICS, CHUNKS, accessions=["acc-9"])
+    assert [c["text"] for c in g["claims"]] == ["Late filer."] and len(g["dropped_claims"]) == 1

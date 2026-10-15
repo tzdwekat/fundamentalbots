@@ -80,7 +80,7 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
     chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
     for a in analyses:
-        a["grounded"] = ground(a["output"], metrics, [chunks_by_id[c] for c in a["chunk_ids"] if c in chunks_by_id])
+        a["grounded"] = ground(a["output"], metrics, [chunks_by_id[c] for c in a["chunk_ids"] if c in chunks_by_id], s["accessions"])
         with conn.cursor() as cur:
             cur.execute("UPDATE analyses SET grounded = %s WHERE snapshot_id = %s AND persona = %s AND provider = %s AND model = %s",
                         (Jsonb(a["grounded"]), sid, a["persona"], a["provider"], a["model"]))

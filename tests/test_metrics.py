@@ -142,3 +142,11 @@ def test_split_adjusted_flag_reaches_metrics():
     assert get(ms, "eps_diluted", "FY2019").value == 2.0 and "split_adjusted" in get(ms, "eps_diluted", "FY2019").flags
     yoy = get(ms, "eps_diluted_yoy", "FY2020")
     assert abs(yoy.value - 0.1) < 1e-9 and "split_adjusted" in yoy.flags
+
+
+def test_tag_ambiguous_flag_reaches_base_metric():
+    base = dict(taxonomy="us-gaap", unit="USD", fy=2024, fp="FY", form="10-K", accession="k", filed=date(2025, 2, 1), start_date=date(2024, 1, 1), end_date=date(2024, 12, 31))
+    rows = [dict(base, tag="RevenueFromContractWithCustomerExcludingAssessedTax", value=100.0), dict(base, tag="Revenues", value=110.0)]
+    s = periods.build_series(pd.DataFrame(rows), periods.load_tag_map())
+    m = get(compute_fundamental_metrics(s), "revenue", "FY2024")
+    assert m.value == 110.0 and "tag_ambiguous" in m.flags

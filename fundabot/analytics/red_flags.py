@@ -8,6 +8,7 @@ import pandas as pd
 from fundabot.analytics.metrics import Metric
 
 GOING_CONCERN = re.compile(r"substantial doubt.{0,300}going concern|going concern.{0,300}substantial doubt", re.I | re.S)
+NEGATED = re.compile(r"\b(no|not|does not|do not|did not|alleviated?)\b", re.I)  # ASU 2014-15 boilerplate in healthy filers
 GOING_CONCERN_ITEMS = ("item7", "item8", "item9a")  # not 1A: risk factors carry boilerplate
 
 
@@ -49,8 +50,15 @@ def text_flags(accession: str, sections: dict[str, str], filings: pd.DataFrame) 
     """Going-concern language in the latest 10-K's MD&A/financials/controls; NT 10-K/10-Q filings in the last 2 years."""
     flags = []
     for item in GOING_CONCERN_ITEMS:
-        if item in sections and GOING_CONCERN.search(sections[item]):
-            flags.append(RedFlag("going_concern", "high", [f"chunk:{accession}#{item}-0"], f"going-concern language in {item} of {accession}"))
+        for m in GOING_CONCERN.finditer(sections.get(item, "")):
+            text = sections[item]
+            start, end = text.rfind(".", 0, m.start()) + 1, text.find(".", m.end())
+            sentence = " ".join(text[start:end if end > 0 else None].split())
+            if NEGATED.search(sentence):
+                continue
+            flags.append(RedFlag("going_concern", "high", [f"chunk:{accession}#{item}-0"], f"{item} of {accession}: \"{sentence[:300]}\""))
+            break
+        if flags:
             break
     if len(filings):
         cutoff = filings.filed.max() - timedelta(days=730)

@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-from fundabot.analytics.metrics import NONPOS, Metric, anchor_name, combine, _prov
+from fundabot.analytics.metrics import NONPOS, Metric, anchor_name, combine, _prov, ttm_from_table
 
 RATIOS = ["pe", "ev_ebitda", "ev_sales", "fcf_yield"]
 RANGE_STATS = ["5y_min", "5y_median", "5y_max", "5y_percentile"]
@@ -46,32 +46,6 @@ def implied_growth(ev_target: float, fcf0: float, lo: float = -0.5, hi: float = 
         if hi - lo < 1e-4:
             break
     return (lo + hi) / 2
-
-
-def _prev_quarter(label: str) -> str:
-    fq, fy = int(label[1]), int(label[4:])
-    return f"Q{fq - 1}FY{fy}" if fq > 1 else f"Q4FY{fy - 1}"
-
-
-def ttm_from_table(fm: dict, item: str, label: str, out_id: str) -> Metric | None:
-    """TTM of a flow item at a period label: the FY value for FY labels, else the sum of four consecutive quarters."""
-    unit = "USD/share" if item == "eps_diluted" else "USD"
-    if label is None:
-        return None
-    if label.startswith("FY"):
-        m = fm.get((item, label))
-        return None if m is None or m.value is None else Metric(out_id, label, m.value, unit, f"{item}@{label} (fiscal year)",
-                                                                {item: _prov(item, m, label)}, list(m.flags), m.tag_used)
-    labels, cur = [], label
-    for _ in range(4):
-        labels.append(cur)
-        cur = _prev_quarter(cur)
-    ms = [fm.get((item, lb)) for lb in labels]
-    if any(m is None or m.value is None for m in ms):
-        return None
-    return Metric(out_id, label, float(sum(m.value for m in ms)), unit, f"sum({item} over {', '.join(labels)})",
-                  {f"{item}@{lb}": _prov(item, m, lb) for lb, m in zip(labels, ms)},
-                  sorted({f for m in ms for f in m.flags}), ms[0].tag_used)
 
 
 def _net_debt(fm: dict, bs_period: str) -> Metric | None:

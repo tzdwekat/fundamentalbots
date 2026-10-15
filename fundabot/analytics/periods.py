@@ -233,9 +233,32 @@ def build_series(facts: pd.DataFrame, tag_map: dict[str, list[str]]) -> dict[str
         if tag is None:
             continue
         s = _build_item(df, tag, fye, offset, additive=item not in NON_ADDITIVE)
-        if not s.empty:
-            series[item] = s
+        if s.empty:
+            continue
+        if item == "revenue":
+            s = _prefer_larger_revenue(df, s, tags, fye, offset)
+        series[item] = s
     return series
+
+
+def _prefer_larger_revenue(df, s, tags, fye, offset):
+    """Filers with finance arms tag both ASC 606 revenue and total Revenues; take the larger total and flag it."""
+    latest = s[s.fq == 0].sort_values("end").iloc[-1] if (s.fq == 0).any() else None
+    if latest is None:
+        return s
+    best = s
+    for tag in tags:
+        if tag == s.tag.iloc[0]:
+            continue
+        alt = df[(df.tag == tag) & (df.end_date == latest.end) & _is_annual(df)]
+        if alt.empty:
+            continue
+        v = alt.sort_values("filed").value.iloc[-1]
+        if v > latest.value * 1.01:
+            best = _build_item(df, tag, fye, offset)
+            best.attrs["tag_ambiguous"] = True
+            latest = best[best.fq == 0].sort_values("end").iloc[-1]
+    return best
 
 
 def ttm(series: pd.DataFrame, as_of: date) -> float | None:

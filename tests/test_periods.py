@@ -196,3 +196,13 @@ def test_split_adjusted_series_flags_and_no_spurious_restatement():
 def test_no_splits_is_a_noop():
     adj = periods.adjust_for_splits(_split_facts(), pd.DataFrame(columns=["date", "ratio"]))
     assert not adj.split_adjusted.any() and adj.value.tolist() == _split_facts().value.tolist()
+
+
+def test_revenue_prefers_larger_total_when_tags_disagree():
+    base = dict(taxonomy="us-gaap", unit="USD", fy=2024, fp="FY", form="10-K", accession="k", filed=date(2025, 2, 1), start_date=date(2024, 1, 1), end_date=date(2024, 12, 31))
+    rows = [dict(base, tag="RevenueFromContractWithCustomerExcludingAssessedTax", value=100.0), dict(base, tag="Revenues", value=110.0)]
+    s = periods.build_series(pd.DataFrame(rows), periods.load_tag_map())
+    assert s["revenue"].tag.iloc[0] == "Revenues" and s["revenue"].attrs.get("tag_ambiguous") is True
+    rows[1]["value"] = 100.5  # within 1%: list order wins, no flag
+    s2 = periods.build_series(pd.DataFrame(rows), periods.load_tag_map())
+    assert s2["revenue"].tag.iloc[0] == "RevenueFromContractWithCustomerExcludingAssessedTax" and not s2["revenue"].attrs.get("tag_ambiguous")

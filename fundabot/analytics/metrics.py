@@ -7,7 +7,7 @@ from fundabot.analytics import bounds, periods
 
 GROWTH_ITEMS = ["revenue", "gross_profit", "operating_income", "eps_diluted", "fcf"]
 PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag",
-                    "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted", "split_adjusted"}
+                    "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted", "split_adjusted", "tag_ambiguous"}
 NONPOS = object()  # sentinel: nonpositive denominator
 
 
@@ -91,10 +91,11 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
     # 1. Base items straight from XBRL.
     for item, df in series.items():
         unit = {"eps_diluted": "USD/share", "diluted_shares": "shares"}.get(item, "USD")
+        extra = ["tag_ambiguous"] if df.attrs.get("tag_ambiguous") else []
         for r in df.itertuples(index=False):
             if r.fy in base_window:
                 prov = {"accession": r.accession, "start": None if r.start is None else str(r.start), "end": str(r.end)}
-                t.add(Metric(item, r.period, float(r.value), unit, f"xbrl:{r.tag}", prov, _row_flags(r), r.tag))
+                t.add(Metric(item, r.period, float(r.value), unit, f"xbrl:{r.tag}", prov, _row_flags(r) + extra, r.tag))
 
     # 2. Derived base items, for every period where inputs exist.
     all_periods = sorted({p for (_, p) in t.m})
@@ -200,15 +201,14 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
                            {"acquisitions": t.get("acquisitions", p), "ocf": t.get("ocf", p)},
                            lambda v: _div(v["acquisitions"], v["ocf"])))
 
-    # 5. Balance sheet: FY window plus the latest quarter (TTM flows).
+    # 5. Balance sheet: FY window plus the latest quarter (TTM flows from the table, so derived items count).
     for p in fy_window + quarters[-1:]:
         is_q = p.startswith("Q")
         ebitda, opinc, intexp = t.get("ebitda", p), t.get("operating_income", p), t.get("interest_expense", p)
         if is_q:
-            as_of = series[anchor_name(series)][series[anchor_name(series)].period == p].end.iloc[0]
-            ebitda = _ttm_metric("ebitda", series, as_of, p, ("operating_income", "da"))
-            opinc = _ttm_metric("operating_income", series, as_of, p)
-            intexp = _ttm_metric("interest_expense", series, as_of, p)
+            ebitda = ttm_from_table(t.m, "ebitda", p, "ebitda_ttm")
+            opinc = ttm_from_table(t.m, "operating_income", p, "operating_income_ttm")
+            intexp = ttm_from_table(t.m, "interest_expense", p, "interest_expense_ttm")
         out.append(combine("net_debt_to_ebitda", p, "net_debt / ebitda" + (" (TTM)" if is_q else ""),
                            {"net_debt": t.get("net_debt", p), "ebitda": ebitda}, lambda v: _div(v["net_debt"], v["ebitda"])))
         out.append(combine("interest_coverage", p, "operating_income / interest_expense" + (" (TTM)" if is_q else ""),
@@ -227,19 +227,31 @@ def anchor_name(series):
     return next((i for i in ("revenue", "net_income") if i in series), next(iter(series)))
 
 
-def _ttm_metric(item, series, as_of, period, parts=None) -> Metric | None:
-    """TTM value of an item (or sum of parts) as a Metric, for quarter-period balance-sheet ratios."""
-    items = parts or (item,)
-    vals = []
-    for it in items:
-        if it not in series:
-            return None
-        v = periods.ttm(series[it], as_of)
-        if v is None:
-            return None
-        vals.append(v)
-    tag = series[items[0]].tag.iloc[0]
-    return Metric(f"{item}_ttm", period, float(sum(vals)), "USD", f"ttm({' + '.join(items)})", {}, [], tag)
+def _prev_quarter(label: str) -> str:
+    fq, fy = int(label[1]), int(label[4:])
+    return f"Q{fq - 1}FY{fy}" if fq > 1 else f"Q4FY{fy - 1}"
+
+
+def ttm_from_table(fm: dict, item: str, label: str, out_id: str) -> Metric | None:
+    """TTM of a flow item at a period label: the FY value for FY labels, else the sum of four consecutive quarters.
+    Carries the quarters' flags and provenance."""
+    unit = "USD/share" if item == "eps_diluted" else "USD"
+    if label is None:
+        return None
+    if label.startswith("FY"):
+        m = fm.get((item, label))
+        return None if m is None or m.value is None else Metric(out_id, label, m.value, unit, f"{item}@{label} (fiscal year)",
+                                                                {item: _prov(item, m, label)}, list(m.flags), m.tag_used)
+    labels, cur = [], label
+    for _ in range(4):
+        labels.append(cur)
+        cur = _prev_quarter(cur)
+    ms = [fm.get((item, lb)) for lb in labels]
+    if any(m is None or m.value is None for m in ms):
+        return None
+    return Metric(out_id, label, float(sum(m.value for m in ms)), unit, f"sum({item} over {', '.join(labels)})",
+                  {f"{item}@{lb}": _prov(item, m, lb) for lb, m in zip(labels, ms)},
+                  sorted({f for m in ms for f in m.flags if f in PROPAGATED_FLAGS}), ms[0].tag_used)
 
 
 def _roic(t, p, avg) -> Metric:

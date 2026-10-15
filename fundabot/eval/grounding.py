@@ -24,31 +24,39 @@ def extract_numbers(text: str) -> list[tuple[str, float]]:
     return out
 
 
-def _supported(text: str, value: float, values: list[float], chunk_blob: str) -> bool:
+def _close(a: float, b: float, is_pct: bool) -> bool:
+    if a == b:
+        return True
+    if is_pct and abs(a - b) <= 0.001:  # absolute floor for percentages: 0.1 point
+        return True
+    return b != 0 and abs(a - b) / abs(b) <= 0.01
+
+
+def _supported(text: str, value: float, values: list[float], chunk_values: list[float]) -> bool:
+    """Within 1% of a shown metric, or equal to a number in a retrieved chunk (also as thousands/millions table units)."""
     is_pct = text.endswith("%")
-    for v in values:
-        if is_pct and abs(v - value) <= 0.005:
-            return True
-        if v != 0 and abs(v - value) / abs(v) <= 0.01:
-            return True
-        if v == 0 and value == 0:
-            return True
-    return re.sub(r"\s+", "", text).lower() in chunk_blob
+    if any(_close(value, v, is_pct) for v in values):
+        return True
+    return any(_close(value, cv * mult, is_pct) for cv in chunk_values for mult in (1.0, 1e3, 1e6))
 
 
-def ground(output: dict, metrics: list[Metric], chunks: list[Chunk]) -> dict:
+def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions: list[str] = ()) -> dict:
+    from fundabot.agents.context import select_periods
+
     g = deepcopy(output)
     exact = {f"metric:{m.metric_id}@{m.period}" for m in metrics}
     any_period = {f"metric:{m.metric_id}" for m in metrics}
     chunk_ids = {f"chunk:{c.id}" for c in chunks}
-    values = [m.value for m in metrics if m.value is not None]
-    chunk_blob = re.sub(r"\s+", "", " ".join(c.text for c in chunks)).lower()
+    filing_ids = {f"filing:{a}" for a in accessions}
+    shown = select_periods(metrics)  # only the periods the agent was given count as support
+    values = [m.value for m in metrics if m.value is not None and m.period in shown]
+    chunk_values = [v for c in chunks for _, v in extract_numbers(c.text)]
 
     def resolve(eid: str) -> bool:
-        return eid in exact or eid in any_period or eid in chunk_ids
+        return eid in exact or eid in any_period or eid in chunk_ids or eid in filing_ids
 
     def check_numbers(text: str) -> list[str]:
-        return [t for t, v in extract_numbers(text) if not _supported(t, v, values, chunk_blob)]
+        return [t for t, v in extract_numbers(text) if not _supported(t, v, values, chunk_values)]
 
     kept, dropped, n_total, n_unsupported = [], [], 0, 0
     for c in g["claims"]:

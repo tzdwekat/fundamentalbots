@@ -36,7 +36,8 @@ def cross_check(ticker: str, metrics: list[Metric], tolerance: float = 0.02) -> 
                 continue
             m = match[0]
             diff = (m.value - float(tv)) / abs(float(tv)) if tv else float("nan")
-            rows.append((mid, m.period, f"{m.value:,.0f}", f"{float(tv):,.0f}", f"{diff:+.2%}" + ("  <-- CHECK" if abs(diff) > tolerance else "")))
+            f = "{:,.2f}" if mid == "eps_diluted" else "{:,.0f}"
+            rows.append((mid, m.period, f.format(m.value), f.format(float(tv)), f"{diff:+.2%}" + ("  <-- CHECK" if abs(diff) > tolerance else "")))
     return pd.DataFrame(rows, columns=["metric", "period", "fundabot", "yfinance", "diff"]).to_string(index=False)
 
 
