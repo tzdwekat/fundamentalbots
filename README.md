@@ -17,3 +17,35 @@ uv run fundabot init-db
 hidden within seconds, and Python 3.12 skips hidden `.pth` files, which silently breaks the editable
 install (`ModuleNotFoundError: fundabot`). Keeping the environment under `~/.venvs` avoids it. Put the
 `export` in your shell profile.
+
+## Commands
+
+```
+uv run fundabot init-db                      # create/upgrade the schema
+uv run fundabot ingest AAPL MSFT             # facts, prices, filing text; builds a snapshot with metrics and red flags
+uv run fundabot metrics AAPL [--json]        # sourced metrics table (every value has a tag, filing and formula)
+uv run fundabot verify AAPL                  # cross-check 4 statement items against yfinance (diagnostic)
+uv run fundabot analyze NVDA AMD [--open]    # five persona agents on Claude -> reports/NVDA/<snapshot>.html
+    --personas bull,bear  --model claude-sonnet-5-5  --force (refetch data)  --rerun (ignore cached analyses)
+```
+
+Keys: Phase 1 commands need none. `analyze` needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (embeddings).
+A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_ID` (Console -> Settings -> Workspaces).
+
+Costs: every model call is logged in `model_calls` with tokens and USD; `FUNDABOT_MONTHLY_BUDGET_USD` is a hard cap
+(the adapter refuses calls once the month's logged spend reaches it). Fill in measured per-ticker cost here after the
+first real run.
+
+## What the report contains
+
+Red flags from the rules engine; a score strip (per persona, plus an unweighted mean clearly labelled as such: the
+evidence-weighted composite, rebuttal round and judge are Phase 3); each persona's thesis and claims with evidence ids,
+claims dropped for unresolved evidence, numbers flagged when they match neither a metric nor a retrieved filing
+passage; the metrics table; DCF assumptions; and a sources appendix for every cited metric and chunk.
+
+## Accuracy notes
+
+See `docs/handcheck-2026-10.md` for the 20-ticker check and `docs/superpowers/specs/` for the period and tag rules.
+Metrics are never guessed: a missing line item is `null` with a reason. Derived values (Q4 = FY - Q1..Q3, Q2/Q3 from
+year-to-date cash-flow statements, composed D&A, reported-total debt, diluted-share fallback) carry flags that travel
+into the agent inputs and the report.

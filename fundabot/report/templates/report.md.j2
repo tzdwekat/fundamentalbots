@@ -1,0 +1,73 @@
+# {{ ticker }} fundamental analysis
+
+snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · code {{ snapshot.code_sha[:8] if snapshot.code_sha else "?" }}
+
+Filings in this snapshot: {% for f in filings %}{{ f.form }} filed {{ f.filed }} (`{{ f.accession }}`){{ ", " if not loop.last }}{% endfor %}
+
+## Red flags
+
+{% if flags %}{% for f in flags %}- **{{ f.flag_id }}** [{{ f.severity }}]: {{ f.detail }} — evidence: {% for e in f.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}{% else %}None from the rules engine.
+{% endif %}
+
+## Scores
+
+| persona | score (−10..10) | confidence | claims kept / dropped | unsupported numbers |
+|---|---|---|---|---|
+{% for a in analyses %}| {{ a.persona }} ({{ a.model }}) | {{ a.grounded.score }} | {{ "%.2f"|format(a.grounded.confidence) }} | {{ a.grounded.claims|length }} / {{ a.grounded.dropped_claims|length }} | {{ a.grounded.stats.numbers_unsupported }} of {{ a.grounded.stats.numbers_total }} |
+{% endfor %}
+**Unweighted mean score: {{ "%.1f"|format(mean_score) }}** (unweighted mean, no judge until Phase 3; disagreement is the point).
+
+{% for a in analyses %}
+## {{ a.persona|capitalize }} ({{ a.provider }}/{{ a.model }})
+
+{{ a.grounded.thesis }}
+{% if a.grounded.thesis_unsupported_numbers %}
+> ⚠ unsupported numbers in thesis: {{ a.grounded.thesis_unsupported_numbers|join(", ") }}
+{% endif %}
+**Claims**
+{% for c in a.grounded.claims %}
+- ({{ c.direction }}, weight {{ c.weight }}) {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}{% if c.unsupported_numbers %} ⚠ unsupported: {{ c.unsupported_numbers|join(", ") }}{% endif %}
+{% endfor %}
+{% if a.grounded.dropped_claims %}
+Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
+{% for c in a.grounded.dropped_claims %}
+- ~~{{ c.text }}~~ — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}
+{% endif %}
+**Key risks:** {{ a.grounded.key_risks|join("; ") }}
+
+**What would change my mind:** {{ a.grounded.what_would_change_my_mind|join("; ") }}
+{% if a.grounded.risks_unsupported_numbers %}
+> ⚠ unsupported numbers in risks: {{ a.grounded.risks_unsupported_numbers|join(", ") }}
+{% endif %}
+Grounding: {{ a.grounded.stats.claims_total }} claims, {{ a.grounded.stats.claims_dropped }} dropped, hallucination rate {{ "%.0f"|format(a.grounded.stats.hallucination_rate * 100) }}% ({{ a.grounded.stats.numbers_unsupported }}/{{ a.grounded.stats.numbers_total }} numbers). Retrieved chunks: {% for cid in a.chunk_ids %}`chunk:{{ cid }}`{{ ", " if not loop.last }}{% endfor %}
+
+{% endfor %}
+## Metrics
+
+Flags: `*` = restated, derived, out_of_bounds or partial data (see the sources appendix for each metric's inputs).
+
+{% for group, rows in metric_groups %}
+### {{ group }}
+
+| metric | {{ columns|join(" | ") }} |
+|---|{% for _ in columns %}---|{% endfor %}
+{% for mid, cells in rows %}| {{ mid }} | {{ cells|join(" | ") }} |
+{% endfor %}
+{% endfor %}
+
+## DCF assumptions
+
+Discount rate {{ dcf.discount_rate }}, terminal growth {{ dcf.terminal_growth }}, {{ dcf.years }}-year horizon; base growth = trailing FCF CAGR clamped to [0%, 25%], bear −5 points, bull +5 points. These are starting assumptions, not forecasts.
+
+## Sources
+
+### Cited metrics
+{% for m in cited_metrics %}
+- `metric:{{ m.metric_id }}@{{ m.period }}` = {{ m.value }} {{ m.unit }}{% if m.flags %} [{{ m.flags|join(", ") }}]{% endif %} ← `{{ m.formula_id }}`{% if m.tag_used %} (tag `{{ m.tag_used }}`){% endif %}{% if m.inputs %} inputs: {{ m.inputs|tojson }}{% endif %}
+{% endfor %}
+### Cited filing chunks
+{% for c in cited_chunks %}
+- `chunk:{{ c.id }}` — {{ c.accession }} {{ c.item }}: {{ c.text[:120]|replace("\n", " ") }}…
+{% endfor %}

@@ -67,5 +67,31 @@ def verify(ticker: str):
     typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
 
 
+@app.command()
+def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
+            open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
+    """Run the persona agents over a fresh snapshot and write a Markdown + HTML report."""
+    import asyncio
+    import webbrowser
+    from pathlib import Path
+
+    from fundabot.agents.adapters.anthropic import AnthropicAdapter
+    from fundabot.db.session import connect
+    from fundabot.orchestrate.pipeline import analyze as run
+    from fundabot.retrieval.embed import OpenAIEmbedder
+
+    conn, adapter, embedder = connect(), AnthropicAdapter(model), OpenAIEmbedder()
+    names = [p.strip() for p in personas.split(",") if p.strip()]
+    for t in tickers:
+        try:
+            html = asyncio.run(run(conn, t, names, adapter, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
+            typer.echo(f"{t.upper()}: {html}")
+            if open_report:
+                webbrowser.open(html.resolve().as_uri())
+        except Exception as e:  # keep going; one bad ticker must not stop a batch
+            conn.rollback()
+            typer.echo(f"{t.upper()}: ERROR {type(e).__name__}: {e}", err=True)
+
+
 if __name__ == "__main__":
     app()
