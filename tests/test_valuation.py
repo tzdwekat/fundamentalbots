@@ -36,10 +36,10 @@ def quarterly(item, values, first_fy=2022):
     for v in values:
         start = date(fy, 3 * (fq - 1) + 1, 1)
         end = (date(fy + (fq == 4), (3 * fq) % 12 + 1, 1) - timedelta(days=1))
-        rows.append((f"Q{fq}FY{fy}", fy, fq, start, end, v, f"acc-{fy}-{fq}", "Tag", False, False))
+        rows.append((f"Q{fq}FY{fy}", fy, fq, start, end, v, f"acc-{fy}-{fq}", "Tag", False, False, False))
         annual[fy] = annual.get(fy, 0) + v
         if fq == 4:
-            rows.append((f"FY{fy}", fy, 0, date(fy, 1, 1), date(fy, 12, 31), annual[fy], f"acc-{fy}-4", "Tag", False, False))
+            rows.append((f"FY{fy}", fy, 0, date(fy, 1, 1), date(fy, 12, 31), annual[fy], f"acc-{fy}-4", "Tag", False, False, False))
             fy, fq = fy + 1, 1
         else:
             fq += 1
@@ -183,3 +183,11 @@ def test_shares_fallback_to_diluted_weighted():
     m = get(out, "shares_outstanding", "current")
     assert m.value == 11.0 and "shares_diluted_weighted" in m.flags
     assert get(out, "market_cap", "current").value == 550.0
+
+
+def test_shares_outstanding_carries_split_flag():
+    from fundabot.analytics import periods
+    facts = dei_facts([(date(2019, 10, 18), 100.0, "k19", date(2019, 10, 30)), (date(2020, 10, 16), 400.0, "k20", date(2020, 10, 30))])
+    adj = periods.adjust_for_splits(facts, pd.DataFrame({"date": [date(2020, 8, 31)], "ratio": [4.0]}))
+    sh = valuation.shares_outstanding(adj)
+    assert sh.shares.tolist() == [400.0, 400.0] and sh.split_adjusted.tolist() == [True, False]

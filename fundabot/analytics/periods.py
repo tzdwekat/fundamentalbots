@@ -21,7 +21,31 @@ class InsufficientHistory(ValueError):
     pass
 
 
-COLUMNS = ["period", "fy", "fq", "start", "end", "value", "accession", "tag", "restated", "derived"]
+COLUMNS = ["period", "fy", "fq", "start", "end", "value", "accession", "tag", "restated", "derived", "split_adjusted"]
+PER_SHARE_TAGS = {"EarningsPerShareDiluted", "EarningsPerShareBasic"}
+SHARE_COUNT_TAGS = {"EntityCommonStockSharesOutstanding", "WeightedAverageNumberOfDilutedSharesOutstanding",
+                    "WeightedAverageNumberOfSharesOutstandingBasic", "CommonStockSharesOutstanding"}
+
+
+def adjust_for_splits(facts: pd.DataFrame, splits: pd.DataFrame) -> pd.DataFrame:
+    """Put per-share and share-count facts filed before a split on the post-split basis.
+
+    A fact filed before the split date is on the pre-split basis (later filings re-report prior periods post-split,
+    so the filing date, not the period end, decides). EPS is divided, share counts multiplied, by the cumulative ratio
+    of all splits after the filing date; adjusted rows carry split_adjusted=True.
+    """
+    out = facts.copy()
+    out["split_adjusted"] = False
+    if splits is None or len(splits) == 0:
+        return out
+    for r in splits.sort_values("date").itertuples(index=False):
+        pre = out.filed.notna() & (out.filed < r.date)
+        eps = pre & out.tag.isin(PER_SHARE_TAGS)
+        cnt = pre & out.tag.isin(SHARE_COUNT_TAGS)
+        out.loc[eps, "value"] = out.loc[eps, "value"] / float(r.ratio)
+        out.loc[cnt, "value"] = out.loc[cnt, "value"] * float(r.ratio)
+        out.loc[eps | cnt, "split_adjusted"] = True
+    return out
 
 
 def load_tag_map() -> dict[str, list[str]]:
@@ -30,6 +54,8 @@ def load_tag_map() -> dict[str, list[str]]:
 
 def _periodic(facts: pd.DataFrame) -> pd.DataFrame:
     df = facts[(facts.taxonomy == "us-gaap") & facts.form.isin(PERIODIC_FORMS)].copy()
+    if "split_adjusted" not in df.columns:
+        df["split_adjusted"] = False
     df["dur"] = (pd.to_datetime(df.end_date) - pd.to_datetime(df.start_date)).dt.days
     return df
 
@@ -112,11 +138,14 @@ def fq_of(end: date, fy: int, fye: tuple[int, int]) -> int:
 def _dedupe(sub: pd.DataFrame) -> pd.DataFrame:
     """One row per (start, end): latest filed value, restated flag vs the first filed value."""
     sub = sub.sort_values(["filed", "accession"])
+    if "split_adjusted" not in sub.columns:
+        sub = sub.assign(split_adjusted=False)
     key = ["start_date", "end_date"]
     first = sub.groupby(key, dropna=False).first()
     last = sub.groupby(key, dropna=False).last()
     out = last.reset_index()
     out["restated"] = ((last.value - first.value).abs() / first.value.abs().replace(0, float("nan")) > 0.005).fillna(False).values
+    out["split_adjusted"] = last.split_adjusted.astype(bool).values
     return out
 
 
@@ -133,16 +162,16 @@ def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int], offset: int = 
         if instant:
             if fq < 1 or fq > 4:
                 continue
-            rows.append((fy, fq, None, end, r.value, r.accession, r.restated, False))
+            rows.append((fy, fq, None, end, r.value, r.accession, r.restated, False, r.split_adjusted))
             if fq == 4:
-                rows.append((fy, 0, None, end, r.value, r.accession, r.restated, False))
+                rows.append((fy, 0, None, end, r.value, r.accession, r.restated, False, r.split_adjusted))
         elif 350 <= r.dur <= 380:
-            rows.append((fy, 0, r.start_date, end, r.value, r.accession, r.restated, False))
+            rows.append((fy, 0, r.start_date, end, r.value, r.accession, r.restated, False, r.split_adjusted))
         elif 80 <= r.dur <= 100 and 1 <= fq <= 4:
-            rows.append((fy, fq, r.start_date, end, r.value, r.accession, r.restated, False))
+            rows.append((fy, fq, r.start_date, end, r.value, r.accession, r.restated, False, r.split_adjusted))
         elif (160 <= r.dur <= 200 and fq == 2) or (240 <= r.dur <= 290 and fq == 3):
-            ytd[(fy, fq)] = (fy, fq, r.start_date, end, r.value, r.accession, r.restated)
-    out = pd.DataFrame(rows, columns=["fy", "fq", "start", "end", "value", "accession", "restated", "derived"])
+            ytd[(fy, fq)] = (fy, fq, r.start_date, end, r.value, r.accession, r.restated, r.split_adjusted)
+    out = pd.DataFrame(rows, columns=["fy", "fq", "start", "end", "value", "accession", "restated", "derived", "split_adjusted"])
     out = out.drop_duplicates(["fy", "fq"], keep="last")
     if not instant and additive:
         out = _derive_from_ytd(out, ytd)
@@ -159,19 +188,19 @@ def _derive_from_ytd(out: pd.DataFrame, ytd: dict) -> pd.DataFrame:
     for (fy, fq), y in sorted(ytd.items()):
         if (fy, fq) in have:
             continue
-        _, _, ystart, yend, yval, yacc, yrest = y
+        _, _, ystart, yend, yval, yacc, yrest, ysplit = y
         if fq == 2 and (fy, 1) in have:
             q1 = have[(fy, 1)]
-            prior, start, restated = q1.value, q1.end + timedelta(days=1), yrest or q1.restated
+            prior, start, restated, split = q1.value, q1.end + timedelta(days=1), yrest or q1.restated, ysplit or q1.split_adjusted
         elif fq == 3 and (fy, 2) in ytd:
             y6 = ytd[(fy, 2)]
-            prior, start, restated = y6[4], y6[3] + timedelta(days=1), yrest or y6[6]
+            prior, start, restated, split = y6[4], y6[3] + timedelta(days=1), yrest or y6[6], ysplit or y6[7]
         elif fq == 3 and (fy, 1) in have and (fy, 2) in have:
             q1, q2 = have[(fy, 1)], have[(fy, 2)]
-            prior, start, restated = q1.value + q2.value, q2.end + timedelta(days=1), yrest or q1.restated or q2.restated
+            prior, start, restated, split = q1.value + q2.value, q2.end + timedelta(days=1), yrest or q1.restated or q2.restated, ysplit or q1.split_adjusted or q2.split_adjusted
         else:
             continue
-        row = (fy, fq, start, yend, yval - prior, yacc, restated, True)
+        row = (fy, fq, start, yend, yval - prior, yacc, restated, True, split)
         extra.append(row)
         have[(fy, fq)] = pd.Series(dict(zip(out.columns, row)))
     if extra:
@@ -187,7 +216,8 @@ def _derive_q4(out: pd.DataFrame) -> pd.DataFrame:
             a = by_q[0]
             v = a.value - sum(by_q[q].value for q in (1, 2, 3))
             restated = any(by_q[q].restated for q in (0, 1, 2, 3))
-            extra.append((fy, 4, by_q[3].end + timedelta(days=1), a.end, v, a.accession, restated, True))
+            split = any(by_q[q].split_adjusted for q in (0, 1, 2, 3))
+            extra.append((fy, 4, by_q[3].end + timedelta(days=1), a.end, v, a.accession, restated, True, split))
     if extra:
         out = pd.concat([out, pd.DataFrame(extra, columns=out.columns)], ignore_index=True)
     return out

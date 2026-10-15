@@ -10,6 +10,7 @@ CHECKS = {  # our metric id -> (yfinance statement attr, row label)
     "net_income": ("income_stmt", "Net Income"),
     "total_assets": ("balance_sheet", "Total Assets"),
     "ocf": ("cashflow", "Operating Cash Flow"),
+    "eps_diluted": ("income_stmt", "Diluted EPS"),  # split-adjusted on yfinance's side: catches missed splits
 }
 
 

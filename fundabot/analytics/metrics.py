@@ -7,7 +7,7 @@ from fundabot.analytics import bounds, periods
 
 GROWTH_ITEMS = ["revenue", "gross_profit", "operating_income", "eps_diluted", "fcf"]
 PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag",
-                    "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted"}
+                    "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted", "split_adjusted"}
 NONPOS = object()  # sentinel: nonpositive denominator
 
 
@@ -74,7 +74,7 @@ class _Table:
 
 
 def _row_flags(row) -> list[str]:
-    return [f for f in ("restated", "derived") if getattr(row, f)]
+    return [f for f in ("restated", "derived", "split_adjusted") if getattr(row, f, False)]
 
 
 def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]:

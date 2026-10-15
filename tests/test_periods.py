@@ -155,3 +155,44 @@ def test_fy_label_follows_company_convention():
     ]
     s = periods.build_series(pd.DataFrame(rows), {"revenue": ["Revenues"]})
     assert set(s["revenue"].period) == {"FY2024", "FY2025", "Q1FY2026"}
+
+
+def _split_facts():
+    """Apple-like 4:1 split on 2020-08-31. Facts filed before the split are on the pre-split basis."""
+    base = dict(taxonomy="us-gaap", tag="EarningsPerShareDiluted", unit="USD/shares", fp="FY", form="10-K")
+    rows = [
+        dict(base, fy=2019, accession="k19", filed=date(2019, 10, 30), start_date=date(2016, 9, 25), end_date=date(2017, 9, 30), value=9.21),   # FY2017, pre-split only
+        dict(base, fy=2019, accession="k19", filed=date(2019, 10, 30), start_date=date(2018, 9, 30), end_date=date(2019, 9, 28), value=11.89),  # FY2019 pre-split
+        dict(base, fy=2020, accession="k20", filed=date(2020, 10, 30), start_date=date(2018, 9, 30), end_date=date(2019, 9, 28), value=2.97),   # FY2019 re-reported post-split
+        dict(base, fy=2020, accession="k20", filed=date(2020, 10, 30), start_date=date(2019, 9, 29), end_date=date(2020, 9, 26), value=3.28),   # FY2020
+        dict(taxonomy="dei", tag="EntityCommonStockSharesOutstanding", unit="shares", fy=2019, fp="FY", form="10-K", accession="k19",
+             filed=date(2019, 10, 30), start_date=None, end_date=date(2019, 10, 18), value=4_443_236_000.0),
+        dict(taxonomy="dei", tag="EntityCommonStockSharesOutstanding", unit="shares", fy=2020, fp="FY", form="10-K", accession="k20",
+             filed=date(2020, 10, 30), start_date=None, end_date=date(2020, 10, 16), value=17_001_802_000.0),
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_split_adjustment_rescales_facts_filed_before_split():
+    splits = pd.DataFrame({"date": [date(2020, 8, 31)], "ratio": [4.0]})
+    adj = periods.adjust_for_splits(_split_facts(), splits)
+    eps = adj[adj.tag == "EarningsPerShareDiluted"].set_index("accession")
+    assert abs(eps.loc["k19"].value.iloc[0] - 9.21 / 4) < 1e-9 and eps.loc["k19"].split_adjusted.all()
+    assert not eps.loc["k20"].split_adjusted.any() and eps.loc["k20"].value.tolist() == [2.97, 3.28]
+    sh = adj[adj.tag == "EntityCommonStockSharesOutstanding"].set_index("accession")
+    assert sh.loc["k19", "value"] == 4_443_236_000.0 * 4 and sh.loc["k19", "split_adjusted"] and not sh.loc["k20", "split_adjusted"]
+
+
+def test_split_adjusted_series_flags_and_no_spurious_restatement():
+    splits = pd.DataFrame({"date": [date(2020, 8, 31)], "ratio": [4.0]})
+    s = periods.build_series(periods.adjust_for_splits(_split_facts(), splits), {"eps_diluted": ["EarningsPerShareDiluted"]})
+    r = {x.period: x for x in s["eps_diluted"].itertuples()}
+    assert abs(r["FY2017"].value - 9.21 / 4) < 1e-9 and r["FY2017"].split_adjusted
+    assert r["FY2019"].value == 2.97 and not r["FY2019"].restated and not r["FY2019"].split_adjusted
+    s_raw = periods.build_series(_split_facts(), {"eps_diluted": ["EarningsPerShareDiluted"]})
+    assert {x.period: x.restated for x in s_raw["eps_diluted"].itertuples()}["FY2019"]  # without adjustment the re-report looks restated
+
+
+def test_no_splits_is_a_noop():
+    adj = periods.adjust_for_splits(_split_facts(), pd.DataFrame(columns=["date", "ratio"]))
+    assert not adj.split_adjusted.any() and adj.value.tolist() == _split_facts().value.tolist()

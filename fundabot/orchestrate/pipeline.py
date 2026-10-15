@@ -33,10 +33,12 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     try:
         price_date = prices.ingest(conn, cik, ticker)
         prices_df = prices.load(conn, cik)
+        prices.ingest_splits(conn, cik, ticker)
     except prices.PriceUnavailable as e:
         log.warning("prices unavailable for %s: %s", ticker, e)
         price_date, prices_df = None, None
     as_of = price_date or date.today()
+    facts = periods.adjust_for_splits(facts, prices.load_splits(conn, cik))
 
     filings = edgar_filings.list_filings(cik)
     accessions = edgar_filings.select_for_snapshot(filings)

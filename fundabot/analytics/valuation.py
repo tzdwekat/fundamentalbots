@@ -21,11 +21,14 @@ ORIGINAL_FORMS = ["10-K", "10-Q"]
 def shares_outstanding(facts: pd.DataFrame) -> pd.DataFrame:
     """Cover-page shares per date: latest accession for that date, all entries summed."""
     dei = facts[(facts.taxonomy == "dei") & (facts.tag == "EntityCommonStockSharesOutstanding")]
+    if "split_adjusted" not in dei.columns:
+        dei = dei.assign(split_adjusted=False)
     rows = []
     for end, grp in dei.groupby("end_date"):
         acc = grp.sort_values(["filed", "accession"]).accession.iloc[-1]
-        rows.append((end, float(grp[grp.accession == acc].value.sum()), acc))
-    return pd.DataFrame(rows, columns=["end_date", "shares", "accession"]).sort_values("end_date").reset_index(drop=True)
+        sel = grp[grp.accession == acc]
+        rows.append((end, float(sel.value.sum()), acc, bool(sel.split_adjusted.any())))
+    return pd.DataFrame(rows, columns=["end_date", "shares", "accession", "split_adjusted"]).sort_values("end_date").reset_index(drop=True)
 
 
 def dcf_ev(fcf0: float, g: float, r: float = DISCOUNT_RATE, tg: float = TERMINAL_GROWTH, years: int = YEARS) -> float:
@@ -88,8 +91,8 @@ def _shares(sh: pd.DataFrame, fm: dict, period: str, label: str, as_of: date | N
         row = sh[sh.end_date <= as_of].tail(1)
     if not row.empty:
         r = row.iloc[0]
-        return Metric("shares_outstanding", period, r.shares, "shares", f"dei:EntityCommonStockSharesOutstanding as of {r.end_date}", {}, [],
-                      "EntityCommonStockSharesOutstanding")
+        return Metric("shares_outstanding", period, r.shares, "shares", f"dei:EntityCommonStockSharesOutstanding as of {r.end_date}", {},
+                      ["split_adjusted"] if r.split_adjusted else [], "EntityCommonStockSharesOutstanding")
     d = fm.get(("diluted_shares", label)) if label else None
     if d is None or d.value is None:
         return None

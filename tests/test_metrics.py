@@ -35,7 +35,7 @@ def hand_series(**items):
         rows = []
         for period, v in vals.items():
             fy = int(period[2:])
-            rows.append((period, fy, 0, date(fy, 1, 1), date(fy, 12, 31), v, "acc", "Tag", False, False))
+            rows.append((period, fy, 0, date(fy, 1, 1), date(fy, 12, 31), v, "acc", "Tag", False, False, False))
         out[name] = pd.DataFrame(rows, columns=periods.COLUMNS)
     return out
 
@@ -129,3 +129,16 @@ def test_total_debt_from_reported_total_tag():
     assert get(compute_fundamental_metrics(s), "net_debt", "FY2024").value == 40.0
     s2 = hand_series(revenue={"FY2024": 1.0}, total_debt_reported={"FY2024": 50.0}, long_term_debt={"FY2024": 30.0}, short_term_debt={"FY2024": 5.0})
     assert get(compute_fundamental_metrics(s2), "total_debt", "FY2024").value == 35.0
+
+
+def test_split_adjusted_flag_reaches_metrics():
+    rows = []
+    for fy, v, filed, acc in [(2019, 8.0, date(2019, 11, 1), "a"), (2020, 2.2, date(2020, 11, 1), "b"), (2021, 2.5, date(2021, 11, 1), "c")]:
+        rows.append(dict(taxonomy="us-gaap", tag="EarningsPerShareDiluted", unit="USD/shares", fy=fy, fp="FY", form="10-K", accession=acc, filed=filed,
+                         start_date=date(fy, 1, 1), end_date=date(fy, 12, 31), value=v))
+    facts = periods.adjust_for_splits(pd.DataFrame(rows), pd.DataFrame({"date": [date(2020, 6, 1)], "ratio": [4.0]}))
+    s = periods.build_series(facts, {"eps_diluted": ["EarningsPerShareDiluted"]})
+    ms = compute_fundamental_metrics(s)
+    assert get(ms, "eps_diluted", "FY2019").value == 2.0 and "split_adjusted" in get(ms, "eps_diluted", "FY2019").flags
+    yoy = get(ms, "eps_diluted_yoy", "FY2020")
+    assert abs(yoy.value - 0.1) < 1e-9 and "split_adjusted" in yoy.flags
