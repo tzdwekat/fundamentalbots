@@ -101,6 +101,7 @@ def _dedupe(sub: pd.DataFrame) -> pd.DataFrame:
 def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int]) -> pd.DataFrame:
     sub = _dedupe(df[df.tag == tag])
     rows = []
+    ytd = {}  # (fy, fq) -> row for 6- and 9-month year-to-date facts
     instant = sub.start_date.isna().all()
     for r in sub.itertuples(index=False):
         end = r.end_date
@@ -116,13 +117,43 @@ def _build_item(df: pd.DataFrame, tag: str, fye: tuple[int, int]) -> pd.DataFram
             rows.append((fy, 0, r.start_date, end, r.value, r.accession, r.restated, False))
         elif 80 <= r.dur <= 100 and 1 <= fq <= 4:
             rows.append((fy, fq, r.start_date, end, r.value, r.accession, r.restated, False))
+        elif (170 <= r.dur <= 190 and fq == 2) or (260 <= r.dur <= 280 and fq == 3):
+            ytd[(fy, fq)] = (fy, fq, r.start_date, end, r.value, r.accession, r.restated)
     out = pd.DataFrame(rows, columns=["fy", "fq", "start", "end", "value", "accession", "restated", "derived"])
     out = out.drop_duplicates(["fy", "fq"], keep="last")
     if not instant:
+        out = _derive_from_ytd(out, ytd)
         out = _derive_q4(out)
     out["tag"] = tag
     out["period"] = [f"FY{fy}" if fq == 0 else f"Q{fq}FY{fy}" for fy, fq in zip(out.fy, out.fq)]
     return out.sort_values(["end", "fq"]).reset_index(drop=True)[COLUMNS]
+
+
+def _derive_from_ytd(out: pd.DataFrame, ytd: dict) -> pd.DataFrame:
+    """Q2 = YTD6 - Q1; Q3 = YTD9 - YTD6 (or YTD9 - Q1 - Q2). Flow statements in 10-Qs are cumulative."""
+    have = {(int(fy), int(fq)): row for fy, fq, row in zip(out.fy, out.fq, out.itertuples(index=False))}
+    extra = []
+    for (fy, fq), y in sorted(ytd.items()):
+        if (fy, fq) in have:
+            continue
+        _, _, ystart, yend, yval, yacc, yrest = y
+        if fq == 2 and (fy, 1) in have:
+            q1 = have[(fy, 1)]
+            prior, start, restated = q1.value, q1.end + timedelta(days=1), yrest or q1.restated
+        elif fq == 3 and (fy, 2) in ytd:
+            y6 = ytd[(fy, 2)]
+            prior, start, restated = y6[4], y6[3] + timedelta(days=1), yrest or y6[6]
+        elif fq == 3 and (fy, 1) in have and (fy, 2) in have:
+            q1, q2 = have[(fy, 1)], have[(fy, 2)]
+            prior, start, restated = q1.value + q2.value, q2.end + timedelta(days=1), yrest or q1.restated or q2.restated
+        else:
+            continue
+        row = (fy, fq, start, yend, yval - prior, yacc, restated, True)
+        extra.append(row)
+        have[(fy, fq)] = pd.Series(dict(zip(out.columns, row)))
+    if extra:
+        out = pd.concat([out, pd.DataFrame(extra, columns=out.columns)], ignore_index=True)
+    return out
 
 
 def _derive_q4(out: pd.DataFrame) -> pd.DataFrame:

@@ -50,6 +50,11 @@ def test_aapl_gross_margin_fy2024(aapl):
     assert get(aapl, "revenue", "FY2024").tag_used == "RevenueFromContractWithCustomerExcludingAssessedTax"
 
 
+def test_base_item_provenance(aapl):
+    m = get(aapl, "revenue", "FY2024")
+    assert m.inputs == {"accession": "0000320193-25-000079", "start": "2023-10-01", "end": "2024-09-28"}
+
+
 def test_aapl_fcf_fy2024(aapl):
     m = get(aapl, "fcf", "FY2024")
     assert m.value == 118254000000 - 9447000000 and m.unit == "USD"

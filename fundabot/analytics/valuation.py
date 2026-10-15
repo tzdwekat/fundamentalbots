@@ -124,11 +124,13 @@ def compute_valuation(series, facts, prices_df, filings: pd.DataFrame, as_of: da
                   latest_q_end or as_of, cur_label, series, fm)
 
     # One point per 10-K/10-Q filing in the last 5 years.
-    hist = filings[filings.form.isin(periods.PERIODIC_FORMS) & (filings.filed >= as_of - timedelta(days=5 * 365))]
+    hist = filings[filings.form.isin(["10-K", "10-Q"]) & (filings.filed >= as_of - timedelta(days=5 * 365))].sort_values("filed", ascending=False)
+    seen = set()
     for f in hist.itertuples(index=False):
-        label = _period_label(anchor, f.period_end, annual=f.form.startswith("10-K")) if f.period_end else None
-        if label is None:
+        label = _period_label(anchor, f.period_end, annual=f.form == "10-K") if f.period_end else None
+        if label is None or label in seen:
             continue
+        seen.add(label)
         sh_f = sh[sh.accession == f.accession]
         if sh_f.empty:
             sh_f = sh[sh.end_date <= f.filed].tail(1)

@@ -92,7 +92,8 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
         unit = "USD/share" if item == "eps_diluted" else "USD"
         for r in df.itertuples(index=False):
             if r.fy in base_window:
-                t.add(Metric(item, r.period, float(r.value), unit, f"xbrl:{r.tag}", {}, _row_flags(r), r.tag))
+                prov = {"accession": r.accession, "start": None if r.start is None else str(r.start), "end": str(r.end)}
+                t.add(Metric(item, r.period, float(r.value), unit, f"xbrl:{r.tag}", prov, _row_flags(r), r.tag))
 
     # 2. Derived base items, for every period where inputs exist.
     all_periods = sorted({p for (_, p) in t.m})

@@ -105,3 +105,19 @@ def test_only_periodic_forms_used(tag_map):
 def test_ttm(aapl):
     assert periods.ttm(aapl["revenue"], date(2024, 9, 28)) == 391035000000
     assert periods.ttm(aapl["revenue"], date(2009, 1, 1)) is None
+
+
+def test_q2_q3_derived_from_ytd(aapl):
+    """10-Q cash-flow statements are cumulative: Q2 = 6-month YTD - Q1, Q3 = 9-month YTD - 6-month YTD."""
+    f = facts("AAPL")
+    ocf = f[(f.tag == "NetCashProvidedByUsedInOperatingActivities") & (f.form.isin(["10-Q", "10-K"]))]
+    ytd6 = ocf[(ocf.start_date == date(2023, 10, 1)) & (ocf.end_date == date(2024, 3, 30))].value.iloc[0]
+    ytd9 = ocf[(ocf.start_date == date(2023, 10, 1)) & (ocf.end_date == date(2024, 6, 29))].value.iloc[0]
+    q1 = row(aapl, "ocf", "Q1FY2024")
+    q2 = row(aapl, "ocf", "Q2FY2024")
+    q3 = row(aapl, "ocf", "Q3FY2024")
+    assert not q1.derived and q2.derived and q3.derived
+    assert q2.value == ytd6 - q1.value and q2.start == date(2023, 12, 31) and q2.end == date(2024, 3, 30)
+    assert q3.value == ytd9 - ytd6
+    assert row(aapl, "ocf", "Q4FY2024").value == row(aapl, "ocf", "FY2024").value - ytd9
+    assert periods.ttm(aapl["ocf"], date(2024, 9, 28)) == row(aapl, "ocf", "FY2024").value

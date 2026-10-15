@@ -117,3 +117,15 @@ def test_price_unavailable(aapl):
     facts, series, fund = aapl
     out = valuation.compute_valuation(series, facts, None, pd.DataFrame(columns=["accession", "form", "filed", "period_end"]), date(2026, 7, 31), fund)
     assert out and all(m.value is None and m.null_reason == "price_unavailable" for m in out)
+
+
+def test_history_ignores_amendments_and_duplicate_labels():
+    series = {"revenue": quarterly("revenue", [10.0] * 12), "eps_diluted": quarterly("eps", [2.5] * 12)}
+    facts = dei_facts([(date(2024, 1, 31), 100.0, "k")])
+    filings = pd.DataFrame(
+        [("k", "10-K", date(2024, 2, 1), date(2023, 12, 31)), ("ka", "10-K/A", date(2024, 4, 1), date(2023, 12, 31))],
+        columns=["accession", "form", "filed", "period_end"],
+    )
+    px = prices([(date(2024, 2, 1), 300.0), (date(2024, 4, 1), 100.0), (date(2024, 12, 31), 250.0)])
+    out = valuation.compute_valuation(series, facts, px, filings, date(2024, 12, 31), compute_fundamental_metrics(series))
+    assert [m.value for m in out if m.metric_id == "pe" and m.period == "FY2023"] == [30.0]
