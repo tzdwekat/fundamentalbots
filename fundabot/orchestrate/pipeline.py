@@ -15,6 +15,17 @@ from fundabot.orchestrate import snapshot
 log = logging.getLogger("fundabot")
 
 
+def _guidance_label(fye, offset):
+    from fundabot.orchestrate.triggers import transcript_key_for
+
+    def label(row):
+        if row.get("call_date"):
+            fy, fq = (int(x) for x in row["key"][1:].split("Q"))
+            return transcript_key_for(row["call_date"], fy, fq, fye, offset)
+        return f"Q{row['key'].split('Q')[1]}FY{row['key'][1:].split('Q')[0]}"
+    return label
+
+
 async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
     """Extract guidance for the snapshot's transcripts that have none yet, then refresh the snapshot's guidance metrics. Returns extractions made."""
     from fundabot.analytics import guidance as guidance_mod
@@ -34,7 +45,10 @@ async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
             await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
             made += 1
     if made:
-        rows = guidance_mod.metrics(guidance_mod.load(conn, s["cik"], keys))
+        from fundabot.orchestrate.triggers import fiscal_calendar
+
+        fye, offset = fiscal_calendar(conn, s["cik"])
+        rows = guidance_mod.metrics(guidance_mod.load(conn, s["cik"], keys), label_fn=_guidance_label(fye, offset))
         with conn.cursor() as cur:
             cur.execute("DELETE FROM metrics WHERE snapshot_id = %s AND metric_id IN ('guidance_direction', 'management_tone')", (sid,))
         conn.commit()
@@ -94,7 +108,8 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     earn = earnings.compute_earnings_metrics(fmp_data, as_of, cur_price, periods.fiscal_year_end(facts, tag_map), periods.fy_offset(facts, tag_map), latest_fetch)
     from fundabot.analytics import guidance as guidance_mod
 
-    guid = guidance_mod.metrics(guidance_mod.load(conn, cik, [a for a in accessions if a.startswith("T")]))
+    fye, offset = periods.fiscal_year_end(facts, tag_map), periods.fy_offset(facts, tag_map)
+    guid = guidance_mod.metrics(guidance_mod.load(conn, cik, [a for a in accessions if a.startswith("T")]), label_fn=_guidance_label(fye, offset))
     flags = red_flags.numeric_flags(fundamentals)
     latest_10k = next((a for a in accessions if filings[filings.accession == a].form.iloc[0] == "10-K"), None)
     if latest_10k:

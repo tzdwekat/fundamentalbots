@@ -39,7 +39,9 @@ def install(binary: Path | None = None, workdir: Path | None = None, home: Path 
         if p.exists():
             run(["launchctl", "bootout", f"gui/{uid}/{label}"], capture_output=True, text=True)
         p.write_text(xml)
-        run(["launchctl", "bootstrap", f"gui/{uid}", str(p)], capture_output=True, text=True)
+        r = run(["launchctl", "bootstrap", f"gui/{uid}", str(p)], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"launchctl bootstrap failed for {label} (exit {r.returncode}): {(r.stderr or r.stdout).strip()}")
         paths.append(p)
     return paths
 

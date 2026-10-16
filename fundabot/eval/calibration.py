@@ -41,7 +41,7 @@ def candidates(conn: psycopg.Connection, horizon_days: int, today: date | None =
 
 
 def compute_outcome(prices_df: pd.DataFrame, spy_df: pd.DataFrame, t0: date, horizon_days: int, surprises_df: pd.DataFrame) -> dict:
-    """Returns from the first close after t0 ... no: from the close on t0 (or the last before it) to the last close on or before t0 + horizon."""
+    """Return from the last close on or before t0 to the last close on or before t0 + horizon; drawdown over that path."""
     t1 = t0 + timedelta(days=horizon_days)
 
     def window(df):
@@ -76,7 +76,8 @@ def _spearman(x, y) -> float | None:
     if len(x) < 3:
         return None
     rx, ry = pd.Series(x).rank(), pd.Series(y).rank()
-    return float(np.corrcoef(rx, ry)[0, 1])
+    r = float(np.corrcoef(rx, ry)[0, 1])
+    return None if np.isnan(r) else r
 
 
 def statistics(rows: list[dict]) -> dict:
@@ -119,6 +120,18 @@ def _benchmark(conn, fetch_prices) -> pd.DataFrame:
     return out
 
 
+HORIZON_SLACK = timedelta(days=5)  # weekends and holidays between t0 + horizon and the last close
+
+
+def _refresh_prices(conn, cik: int, ticker: str, fetch_prices) -> pd.DataFrame:
+    df = fetch_prices(ticker)
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO prices (cik, date, close) VALUES (%s, %s, %s) ON CONFLICT (cik, date) DO UPDATE SET close = EXCLUDED.close",
+                        [(cik, r.date, float(r.close)) for r in df.itertuples(index=False)])
+    conn.commit()
+    return prices_mod.load(conn, cik)
+
+
 def run(conn: psycopg.Connection, horizons=(30, 90, 180), fetch_prices=prices_mod.fetch_daily_closes, today: date | None = None) -> dict[int, dict]:
     from fundabot.ingest import fmp
 
@@ -129,26 +142,39 @@ def run(conn: psycopg.Connection, horizons=(30, 90, 180), fetch_prices=prices_mo
         log.warning("calibration: %s", e)
         return {h: {"insufficient_history": True, "n": 0, "error": f"benchmark prices unavailable: {e}"} for h in horizons}
     results = {}
+    refreshed: dict[int, pd.DataFrame | None] = {}
     for h in horizons:
         for c in candidates(conn, h, today):
-            px = prices_mod.load(conn, c["cik"])
-            sur = fmp.load(conn, c["cik"])["surprises"]
-            o = compute_outcome(px, spy, c["t0"], h, sur)
+            if c["cik"] not in refreshed:  # fresh closes per ticker, once per run; stored prices only grow when the ticker is analysed
+                try:
+                    refreshed[c["cik"]] = _refresh_prices(conn, c["cik"], c["ticker"], fetch_prices)
+                except prices_mod.PriceUnavailable as e:
+                    log.warning("calibration %s: %s", c["ticker"], e)
+                    refreshed[c["cik"]] = None
+            px = refreshed[c["cik"]]
+            scores = {"composite_score": c["composite_score"], "agents": c["agents"], **{k: c.get(k) for k in ("quality_score", "value_score", "earnings_momentum_score", "accounting_risk_score")}}
+            if px is None:
+                o = {"t0": c["t0"], "t1": None, "ticker_return": None, "spy_return": None, "excess_return": None, "max_drawdown": None, "next_eps_surprise": None, "reason": "prices_unavailable"}
+            else:
+                o = compute_outcome(px, spy, c["t0"], h, fmp.load(conn, c["cik"])["surprises"])
+                if o["reason"] is None and o["t1"] < c["t0"] + timedelta(days=h) - HORIZON_SLACK:
+                    log.info("calibration %s %sd: prices end %s, horizon not covered yet", c["ticker"], h, o["t1"])
+                    continue  # left pending: a truncated horizon must never be stored as a return
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO outcomes (snapshot_id, run_kind, horizon_days, t0, t1, ticker_return, spy_return, excess_return, next_eps_surprise, max_drawdown, reason) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                            (c["snapshot_id"], c["run_kind"], h, o["t0"], o["t1"], o["ticker_return"], o["spy_return"], o["excess_return"], o["next_eps_surprise"], o["max_drawdown"], o["reason"]))
+                cur.execute("INSERT INTO outcomes (snapshot_id, run_kind, horizon_days, t0, t1, ticker_return, spy_return, excess_return, next_eps_surprise, max_drawdown, reason, composite_score, scores) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                            (c["snapshot_id"], c["run_kind"], h, o["t0"], o["t1"], o["ticker_return"], o["spy_return"], o["excess_return"], o["next_eps_surprise"], o["max_drawdown"], o["reason"],
+                             c["composite_score"], Jsonb(scores)))
             conn.commit()
         with conn.cursor() as cur:
-            cur.execute("""SELECT o.snapshot_id, o.run_kind, o.excess_return, o.max_drawdown, o.next_eps_surprise, v.verdict FROM outcomes o
-                           LEFT JOIN verdicts v ON v.snapshot_id = o.snapshot_id AND v.run_kind = 'full' WHERE o.horizon_days = %s AND o.excess_return IS NOT NULL""", (h,))
+            cur.execute("SELECT excess_return, max_drawdown, next_eps_surprise, composite_score, scores FROM outcomes WHERE horizon_days = %s AND excess_return IS NOT NULL", (h,))
             rows = []
-            for sid, kind, ex, dd, sup, v in cur.fetchall():
-                v = v or {}
-                agents = [(c["score"], c.get("confidence", 0.5)) for c in (v.get("grid") or {}).values()]
-                rows.append({"composite_score": v.get("composite_score"), "quality_score": v.get("quality_score"), "value_score": v.get("value_score"),
-                             "earnings_momentum_score": v.get("earnings_momentum_score"), "accounting_risk_score": v.get("accounting_risk_score"),
-                             "excess_return": float(ex), "max_drawdown": None if dd is None else float(dd), "next_eps_surprise": None if sup is None else float(sup), "agents": agents})
+            for ex, dd, sup, comp, sc in cur.fetchall():
+                sc = sc or {}
+                rows.append({"composite_score": None if comp is None else float(comp), "quality_score": sc.get("quality_score"), "value_score": sc.get("value_score"),
+                             "earnings_momentum_score": sc.get("earnings_momentum_score"), "accounting_risk_score": sc.get("accounting_risk_score"),
+                             "excess_return": float(ex), "max_drawdown": None if dd is None else float(dd), "next_eps_surprise": None if sup is None else float(sup),
+                             "agents": [tuple(a) for a in sc.get("agents", [])]})
         stats = statistics(rows)
         with conn.cursor() as cur:
             cur.execute("INSERT INTO calibration_runs (horizon_days, n, stats) VALUES (%s, %s, %s)", (h, stats["n"], Jsonb(stats)))

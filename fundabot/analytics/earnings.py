@@ -132,6 +132,9 @@ def compute_earnings_metrics(fmp: dict, as_of: date, price: float | None, fye: t
             out.append(_m(mid, "current", (chg / prev) if prev else None, "change / prior-quarter level (FMP 13F summary)", {**inp, "level": cur_v, "change": chg},
                           None if prev else ("nonpositive_denominator" if prev == 0 else "no_coverage")))
     ins = fmp.get("insiders")
+    if ins is not None and len(ins):  # FMP insider statistics are calendar quarters including the one in progress
+        q_end = ins.apply(lambda r: date(int(r.year) + (1 if int(r.quarter) == 4 else 0), (int(r.quarter) * 3) % 12 + 1, 1) - timedelta(days=1), axis=1)
+        ins = ins[q_end <= as_of]
     ins = ins.sort_values(["year", "quarter"]).tail(1) if ins is not None and len(ins) else None
     if ins is None or ins.empty:
         out += [_m(mid, "current", None, mid, reason="no_coverage") for mid in ("insider_net_shares_90d", "insider_buy_sell_ratio")]

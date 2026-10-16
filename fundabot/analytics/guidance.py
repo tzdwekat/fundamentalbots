@@ -46,11 +46,15 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip().lower()
 
 
+MIN_QUOTE_WORDS, MIN_QUOTE_CHARS = 4, 20
+
+
 def verify(output: dict, chunks_by_id: dict[str, Chunk]) -> dict:
-    """Keep a statement only if its chunk resolves and its quote is verbatim in that chunk; same for tone."""
+    """Keep a statement only if its chunk resolves and its quote is a verbatim sentence-length span of that chunk; same for tone."""
     def ok(quote, chunk_ref):
         cid = chunk_ref.split(":", 1)[1] if chunk_ref.startswith("chunk:") else chunk_ref
-        return cid in chunks_by_id and bool(_norm(quote)) and _norm(quote) in _norm(chunks_by_id[cid].text)
+        q = _norm(quote)
+        return cid in chunks_by_id and len(q) >= MIN_QUOTE_CHARS and len(q.split()) >= MIN_QUOTE_WORDS and q in _norm(chunks_by_id[cid].text)
     kept = [s for s in output.get("statements", []) if ok(s.get("quote", ""), s.get("chunk", ""))]
     dropped = len(output.get("statements", [])) - len(kept)
     tone_ok = output.get("tone") in TONE and ok(output.get("tone_quote", ""), output.get("tone_chunk", ""))
@@ -70,10 +74,11 @@ def load(conn: psycopg.Connection, cik: int, keys: list[str]) -> list[dict]:
     with conn.cursor() as cur:
         for k in keys:
             fy, fq = (int(x) for x in k[1:].split("Q"))
-            cur.execute("SELECT statements, tone, tone_quote, tone_chunk FROM guidance WHERE cik = %s AND fy = %s AND fq = %s", (cik, fy, fq))
+            cur.execute("SELECT g.statements, g.tone, g.tone_quote, g.tone_chunk, t.call_date FROM guidance g LEFT JOIN transcripts t USING (cik, fy, fq) "
+                        "WHERE g.cik = %s AND g.fy = %s AND g.fq = %s", (cik, fy, fq))
             r = cur.fetchone()
             if r:
-                rows.append({"key": k, "statements": r[0], "tone": r[1], "tone_quote": r[2], "tone_chunk": r[3]})
+                rows.append({"key": k, "statements": r[0], "tone": r[1], "tone_quote": r[2], "tone_chunk": r[3], "call_date": r[4]})
     return rows
 
 
@@ -94,10 +99,11 @@ async def extract(conn: psycopg.Connection, cik: int, key: str, adapter, chunks:
     return {"key": key, **{k: v[k] for k in ("statements", "tone", "tone_quote", "tone_chunk")}}
 
 
-def metrics(rows: list[dict]) -> list[Metric]:
+def metrics(rows: list[dict], label_fn=None) -> list[Metric]:
+    """label_fn(row) -> our period label (from the call date and the company's fiscal calendar); default uses FMP's labels."""
     out = []
     for r in rows:
-        label = label_for_key(r["key"])
+        label = label_fn(r) if label_fn else label_for_key(r["key"])
         formula = f"guidance statements extracted from transcript {r['key']} (FMP fiscal labels), verified quotes"
         sts = r["statements"] or []
         primary = next((s for s in sts if s["metric"] == "revenue"), None) or next((s for s in sts if s["metric"] == "eps"), None)
