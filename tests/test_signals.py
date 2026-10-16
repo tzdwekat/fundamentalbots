@@ -68,3 +68,13 @@ def test_missing_ownership_data_is_null():
 def test_skeptic_reads_ownership():
     from fundabot.agents import personas
     assert any("insider" in r.lower() or "13f" in r.lower() for r in personas.load_all()["skeptic"]["reads_most"])
+
+
+def test_institutional_ignores_quarters_still_being_filed():
+    """13F filings arrive up to 45 days after quarter end; a quarter younger than 60 days is partial and must be skipped."""
+    inst = [(date(2026, 6, 30), 6474, 56, 9.78e9, 3.7e8), (date(2026, 9, 30), 1016, -5458, 1.22e8, -9.66e9)]
+    ms = compute_earnings_metrics(full_fmp((), inst, []), date(2026, 10, 16), 340.0, FYE, OFFSET, T1)
+    m = get(ms, "inst_holders_change_pct")
+    assert m.inputs["quarter_end"] == "2026-06-30" and abs(m.value - 56 / 6418) < 1e-9
+    ms2 = compute_earnings_metrics(full_fmp((), inst, []), date(2026, 12, 15), 340.0, FYE, OFFSET, T1)
+    assert get(ms2, "inst_holders_change_pct").inputs["quarter_end"] == "2026-09-30"

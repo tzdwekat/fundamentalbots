@@ -119,6 +119,8 @@ def compute_earnings_metrics(fmp: dict, as_of: date, price: float | None, fye: t
 
     # Institutional (13F summary) and insider activity.
     inst = fmp.get("institutional")
+    if inst is not None and len(inst):  # 13F filings land up to 45 days after quarter end; younger quarters are partial
+        inst = inst[inst.quarter_end <= as_of - timedelta(days=60)]
     inst = inst.sort_values("quarter_end").tail(1) if inst is not None and len(inst) else None
     if inst is None or inst.empty:
         out += [_m(mid, "current", None, mid, reason="no_coverage") for mid in ("inst_holders_change_pct", "inst_shares_change_pct")]

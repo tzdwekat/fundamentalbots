@@ -119,6 +119,8 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     from fundabot.retrieval.query import embed_missing, load_chunks
 
     sid = prepare(conn, ticker, force=force)
+    if guidance_adapter is not None:
+        await ensure_guidance(conn, sid, guidance_adapter)
     s = snapshot.load(conn, sid)
     embed_missing(conn, embedder, s["accessions"])
     if rerun:

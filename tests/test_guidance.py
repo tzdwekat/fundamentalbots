@@ -96,3 +96,37 @@ async def test_ensure_guidance_adds_metrics_to_snapshot(db_conn, monkeypatch):
     ms = {(m.metric_id, m.period): m for m in snapshot.load_metrics(db_conn, sid)}
     assert ms[("guidance_direction", "Q3FY2026")].value == -1 and ms[("management_tone", "Q3FY2026")].value == -1
     assert await pipeline.ensure_guidance(db_conn, sid, adapter) == 0 and adapter.calls == 1
+
+
+@pytest.mark.db
+async def test_analyze_runs_guidance_extraction(db_conn, monkeypatch, tmp_path):
+    """The cheap run must extract guidance for the snapshot's transcripts when given a guidance adapter."""
+    from fundabot.orchestrate import pipeline
+    from fundabot.retrieval.embed import FakeEmbedder
+    from tests.test_pipeline import FIX as PFIX, fake_output
+    from tests.test_pipeline import fixture_prepare as _fp  # noqa: F401
+    import json
+    from datetime import date
+    import pandas as pd
+    from fundabot.ingest import edgar_facts, edgar_filings, fmp, prices
+
+    payload = json.loads((PFIX / "AAPL_companyfacts.json").read_text())
+    monkeypatch.setattr(edgar_facts, "ticker_to_cik", lambda t: 320193)
+    monkeypatch.setattr(edgar_facts, "fetch_companyfacts", lambda cik: payload)
+    monkeypatch.setattr(prices, "fetch_daily_closes", lambda t, years=5: pd.DataFrame({"date": [date(2026, 10, 14)], "close": [340.0]}))
+    monkeypatch.setattr(prices, "fetch_splits", lambda t: pd.DataFrame(columns=["date", "ratio"]))
+    filings = pd.DataFrame([("0000320193-25-000079", "10-K", date(2025, 10, 31), date(2025, 9, 27), "", "")], columns=["accession", "form", "filed", "period_end", "primary_doc_url", "items"])
+    filings.attrs["name"] = "Apple Inc."
+    monkeypatch.setattr(edgar_filings, "list_filings", lambda cik: filings)
+    monkeypatch.setattr(edgar_filings, "extract_items", lambda acc, cik, form, filed, company="": ({"item1a": (PFIX / "sections/aapl_10k_item1a.txt").read_text()}, True))
+    monkeypatch.setattr(fmp, "fetch_all", lambda t: {k: json.loads((PFIX / f"fmp_aapl_{k}.json").read_text()) for k in ("estimates_annual", "earnings", "price_target")})
+    monkeypatch.setattr(fmp, "fetch_transcript_dates", lambda t: [{"quarter": 3, "fiscalYear": 2026, "date": "2026-07-30"}])
+    monkeypatch.setattr(fmp, "fetch_transcript", lambda t, y, q: json.loads((PFIX / "fmp_aapl_transcript_2026q3.json").read_text())[0])
+    cs = chunks()
+    gadapter = FakeAdapter([output([{"metric": "revenue", "period": "Q4", "direction": "raised", "quote": cs[0].text[100:160], "chunk": f"chunk:{cs[0].id}"}],
+                                   tone="confident", tone_quote=cs[0].text[10:40], tone_chunk=f"chunk:{cs[0].id}")])
+    await pipeline.analyze(db_conn, "AAPL", ["bull"], FakeAdapter(fake_output), FakeEmbedder(), out_dir=tmp_path, guidance_adapter=gadapter)
+    assert gadapter.calls == 1
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT value FROM metrics WHERE metric_id = 'guidance_direction' AND period = 'Q3FY2026'")
+        assert cur.fetchone()[0] == 1
