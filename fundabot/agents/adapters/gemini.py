@@ -17,18 +17,19 @@ PRICES = {  # USD per million tokens (input, output) for prompts <= 200k, ai.goo
 }
 RETRYABLE = ("429", "500", "502", "503", "504", "timeout", "deadline", "unavailable", "resource exhausted", "resource_exhausted")
 RETRY_IN = re.compile(r"retry in ([\d.]+)s", re.I)
-_locks: dict = {}  # one Lock per event loop (the CLI runs one loop per ticker); free-tier quotas are per minute
+CONCURRENCY = 4  # per event loop; a free-tier key still 429s above ~2 and is handled by the retry delay below
+_locks: dict = {}  # one Semaphore per event loop (the CLI runs one loop per ticker)
 
 
-def _lock() -> asyncio.Lock:
+def _lock() -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
-    return _locks.setdefault(loop, asyncio.Lock())
+    return _locks.setdefault(loop, asyncio.Semaphore(CONCURRENCY))
 
 
 class GeminiAdapter:
     provider = "gemini"
 
-    def __init__(self, model: str = "gemini-3.8-flash", max_tokens: int = 8000):  # pro tiers need billing enabled on the Gemini key
+    def __init__(self, model: str = "gemini-3.1-pro-preview", max_tokens: int = 8000):
         self.model, self.max_tokens = model, max_tokens
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
@@ -46,7 +47,7 @@ class GeminiAdapter:
         t0 = time.monotonic()
         config = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", response_json_schema=schema,
                                              max_output_tokens=self.max_tokens)
-        async with _lock():  # one Gemini call in flight at a time
+        async with _lock():
             for attempt in range(5):
                 try:
                     r = await self._client.aio.models.generate_content(model=self.model, contents=user, config=config)

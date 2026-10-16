@@ -120,4 +120,4 @@ async def test_gemini_adapter_honors_retry_delay_and_serializes(monkeypatch):
     monkeypatch.setattr(gmod.asyncio, "sleep", fake_sleep)
     results = await asyncio.gather(*[a.complete("s", "u", schemas.AGENT_OUTPUT_SCHEMA) for _ in range(3)])
     assert all(r.output == GOOD for r in results) and len(attempts) == 4
-    assert max(sleeps) >= 1.5 and peak == 1  # waited the server's retry delay; calls were serialized
+    assert max(sleeps) >= 1.5 and peak <= gmod.CONCURRENCY  # waited the server's retry delay; concurrency capped

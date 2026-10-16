@@ -33,9 +33,8 @@ uv run fundabot analyze NVDA --full          # Phase 3: 5 personas x 3 providers
 uv run fundabot grid NVDA                    # persona x provider score grid with row/column spreads and hallucination rates
 ```
 
-Provider defaults: personas on `claude-sonnet-5-5`, `gpt-5.4`, `gemini-3.8-flash`; judges on `claude-opus-5-5`, `gpt-5.4`,
-`gemini-3.8-flash`. The Gemini key is on the free tier, so the Pro models return quota errors; switch the defaults in
-`fundabot/cli.py` (`JUDGE_MODELS`) and `agents/adapters/gemini.py` to `gemini-3.1-pro-preview` once billing is enabled.
+Provider defaults: personas on `claude-sonnet-5-5`, `gpt-5.4`, `gemini-3.1-pro-preview`; judges on `claude-opus-5-5`, `gpt-5.4`,
+`gemini-3.1-pro-preview`. The Gemini key needs billing enabled (a free-tier key only serves `gemini-3.8-flash`, slowly).
 Every round is cached per snapshot: a repeated `--full` run on the same day costs $0; `--rerun` discards all rounds.
 
 Measured on 2026-10-15 for AAPL `--full` (Gemini column failed on free-tier limits, so 10 agents + 2 judges): $3.23 and
