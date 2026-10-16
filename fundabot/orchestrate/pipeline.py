@@ -42,8 +42,12 @@ async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
             continue
         sections = edgar_filings.load_sections(conn, k)
         if "call" in sections:
-            await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
-            made += 1
+            try:
+                await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
+                made += 1
+            except Exception as e:  # guidance is optional input; a failed extraction must not stop the analysis
+                log.warning("guidance extraction failed for %s %s: %s", s["ticker"], k, e)
+                conn.rollback()
     if made:
         from fundabot.orchestrate.triggers import fiscal_calendar
 

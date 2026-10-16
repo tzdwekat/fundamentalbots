@@ -6,7 +6,7 @@ legend for >= 2 series, selective end labels, text in ink tokens never series co
 """
 from html import escape
 
-W, H, PAD_L, PAD_R, PAD_T, PAD_B = 640, 220, 56, 72, 28, 36
+W, H, PAD_L, PAD_R, PAD_T, PAD_B = 640, 236, 56, 72, 48, 36  # PAD_T leaves a title row and a legend row
 SERIES = 4  # categorical slots used (validated all-adjacent in both modes)
 
 VIZ_CSS = """
@@ -109,7 +109,7 @@ def line_chart(title: str, series: list[tuple[str, list[tuple[str, float | None]
         x = PAD_L
         out.append('<g class="legend">')
         for si, (label, _) in enumerate(series[:SERIES]):
-            out.append(f'<rect x="{x}" y="{PAD_T - 16}" width="10" height="10" rx="2" fill="var(--series-{si + 1})"/><text x="{x + 14}" y="{PAD_T - 7}" class="muted">{escape(label)}</text>')
+            out.append(f'<rect x="{x}" y="{PAD_T - 18}" width="10" height="10" rx="2" fill="var(--series-{si + 1})"/><text x="{x + 14}" y="{PAD_T - 9}" class="muted">{escape(label)}</text>')
             x += 14 + 7 * len(label) + 18
         out.append("</g>")
     out.append("</svg>")

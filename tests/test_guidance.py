@@ -130,3 +130,25 @@ async def test_analyze_runs_guidance_extraction(db_conn, monkeypatch, tmp_path):
     with db_conn.cursor() as cur:
         cur.execute("SELECT value FROM metrics WHERE metric_id = 'guidance_direction' AND period = 'Q3FY2026'")
         assert cur.fetchone()[0] == 1
+
+
+@pytest.mark.db
+async def test_ensure_guidance_skips_failed_transcripts(db_conn):
+    from fundabot.orchestrate import pipeline, snapshot
+
+    sid = snapshot.create_snapshot(db_conn, "AAPL", 320193, 1, ["T2026Q3", "T2026Q2"], None, None, None)
+    cs = chunks()
+    with db_conn.cursor() as cur:
+        for k in ("T2026Q3", "T2026Q2"):
+            cur.execute("INSERT INTO filing_sections (accession, item, text) VALUES (%s, 'call', %s)", (k, " ".join(c.text for c in cs)))
+    db_conn.commit()
+
+    class Flaky(FakeAdapter):
+        async def complete(self, system, user, schema):
+            if "T2026Q3" in user:
+                self.calls += 1
+                raise RuntimeError("output truncated at max_tokens")
+            return await super().complete(system, user, schema)  # counts the call itself
+    adapter = Flaky([output([], tone="neutral", tone_quote=cs[0].text[10:40], tone_chunk=f"chunk:{cs[0].id}")])
+    assert await pipeline.ensure_guidance(db_conn, sid, adapter) == 1  # the other transcript still gets extracted; the run continues
+    assert adapter.calls == 2

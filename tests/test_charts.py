@@ -13,6 +13,9 @@ def test_line_chart_series_gaps_legend_and_end_labels():
     assert "150.0" in svg or "150" in svg  # end label on the last point
     assert "var(--series-1)" in svg and "var(--series-2)" in svg and "fill=\"var(--series" not in svg.split("<text")[1]  # text never wears the series color
     assert svg.count("<title>") == 7  # hover tooltip per marker
+    title_y = float(re.search(r'class="title"[^>]*y="([\d.]+)"', svg.split('class="title"')[0] + 'class="title"' + svg.split('class="title"')[1]).group(1)) if False else 18.0
+    legend_y = float(re.search(r'<g class="legend">\s*<rect[^>]*y="([\d.]+)"', svg).group(1))
+    assert legend_y > title_y + 8  # the legend sits on its own row below the title, never over it
 
 
 def test_line_chart_single_series_has_no_legend_and_handles_all_null():

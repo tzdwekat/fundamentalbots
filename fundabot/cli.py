@@ -161,7 +161,7 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
     adapters, judge_adapters = build_adapters(full, providers, model, judges)
-    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 4000)
+    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
     for t in tickers:
         try:
             if full:
@@ -217,7 +217,7 @@ def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-s
     from fundabot.retrieval.embed import OpenAIEmbedder
 
     adapters, judge_adapters = build_adapters(full, providers, model, judges)
-    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 4000)
+    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
 
     async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
         conn = connect()
