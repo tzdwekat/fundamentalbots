@@ -53,6 +53,10 @@ Costs: every model call is logged in `model_calls` with tokens and USD; `FUNDABO
 
 ## What the report contains
 
+Charts (inline SVG, no dependencies, light and dark mode): revenue and free cash flow, margins and ROIC, quarterly
+revenue growth, and each valuation ratio marked on its own 5-year range. The full-run verdict adds the persona × provider
+score grid as a diverging heatmap. Every value also appears in the metrics table, which is the accessible table view.
+
 Red flags from the rules engine; a score strip (per persona, plus an unweighted mean clearly labelled as such: the
 evidence-weighted composite, rebuttal round and judge are Phase 3); each persona's thesis and claims with evidence ids,
 claims dropped for unresolved evidence, numbers flagged when they match neither a metric nor a retrieved filing
