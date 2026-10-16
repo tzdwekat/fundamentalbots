@@ -72,14 +72,14 @@ def test_run_stores_outcomes(db_conn):
         fetched.append(ticker)
         return prices(date(2026, 1, 1), [100 + 0.5 * i for i in range(40)])
     stats = calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))
-    assert fetched == ["SPY"] and stats[30]["insufficient_history"] is True and stats[30]["n"] == 1
+    assert fetched == ["SPY", "AAPL"] and stats[30]["insufficient_history"] is True and stats[30]["n"] == 1  # ticker closes refreshed too
     with db_conn.cursor() as cur:
         cur.execute("SELECT horizon_days, ticker_return, excess_return FROM outcomes WHERE snapshot_id = %s", (sid,))
         h, tr, ex = cur.fetchone()
         cur.execute("SELECT count(*) FROM calibration_runs"); assert cur.fetchone()[0] == 1
         cur.execute("SELECT count(*) FROM benchmark_prices WHERE ticker = 'SPY'"); assert cur.fetchone()[0] == 40
     assert h == 30 and abs(float(tr) - 0.30) < 1e-9 and abs(float(ex) - (0.30 - 0.15)) < 1e-9
-    assert calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))[30]["n"] == 1 and fetched == ["SPY", "SPY"]  # outcome cached, SPY refreshed per run
+    assert calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))[30]["n"] == 1 and fetched == ["SPY", "AAPL", "SPY"]  # outcome cached: no ticker refresh
 
 
 @pytest.mark.db

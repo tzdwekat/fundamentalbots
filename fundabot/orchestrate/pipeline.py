@@ -47,8 +47,11 @@ async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
     if made:
         from fundabot.orchestrate.triggers import fiscal_calendar
 
-        fye, offset = fiscal_calendar(conn, s["cik"])
-        rows = guidance_mod.metrics(guidance_mod.load(conn, s["cik"], keys), label_fn=_guidance_label(fye, offset))
+        try:
+            label_fn = _guidance_label(*fiscal_calendar(conn, s["cik"]))
+        except periods.InsufficientHistory:  # no XBRL facts yet: fall back to FMP's own fiscal labels
+            label_fn = None
+        rows = guidance_mod.metrics(guidance_mod.load(conn, s["cik"], keys), label_fn=label_fn)
         with conn.cursor() as cur:
             cur.execute("DELETE FROM metrics WHERE snapshot_id = %s AND metric_id IN ('guidance_direction', 'management_tone')", (sid,))
         conn.commit()

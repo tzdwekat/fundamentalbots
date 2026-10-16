@@ -50,9 +50,10 @@ def test_institutional_and_insider_metrics():
     ms = compute_earnings_metrics(full_fmp((), inst, ins), date(2026, 10, 14), 340.0, FYE, OFFSET, T1)
     assert abs(get(ms, "inst_holders_change_pct").value - 56 / 6418) < 1e-9 and get(ms, "inst_holders_change_pct").inputs["quarter_end"] == "2026-06-30"
     assert abs(get(ms, "inst_shares_change_pct").value - 3.7e8 / (9.78e9 - 3.7e8)) < 1e-9
-    assert get(ms, "insider_net_shares_90d").value == 774053 - 1223409 and get(ms, "insider_net_shares_90d").unit == "shares"
-    assert get(ms, "insider_buy_sell_ratio").value == 0.0  # 0 purchases over 12 sales is a real ratio
-    ms0 = compute_earnings_metrics(full_fmp((), inst, [(2026, 4, 1.0, 0.0, 0, 0)]), date(2026, 10, 14), 340.0, FYE, OFFSET, T1)
+    # as_of 2026-10-16 sits inside calendar Q4, so the completed Q3 row is used
+    assert get(ms, "insider_net_shares_90d").value == 455601 - 59762 and get(ms, "insider_net_shares_90d").unit == "shares"
+    assert abs(get(ms, "insider_buy_sell_ratio").value - 2 / 3) < 1e-9
+    ms0 = compute_earnings_metrics(full_fmp((), inst, [(2026, 3, 1.0, 0.0, 0, 0)]), date(2026, 10, 14), 340.0, FYE, OFFSET, T1)
     assert get(ms0, "insider_buy_sell_ratio").value is None and get(ms0, "insider_buy_sell_ratio").null_reason == "nonpositive_denominator"
     assert all("vendor_fmp" in get(ms, k).flags for k in ("inst_holders_change_pct", "insider_net_shares_90d"))
 
