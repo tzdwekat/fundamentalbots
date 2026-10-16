@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 from fundabot.analytics import earnings, periods, red_flags, valuation
 from fundabot.analytics.metrics import compute_fundamental_metrics
-from fundabot.ingest import edgar_facts, edgar_filings, fmp, prices
+from fundabot.ingest import edgar_facts, edgar_filings, fmp, prices, transcripts
 from fundabot.orchestrate import snapshot
 
 log = logging.getLogger("fundabot")
@@ -44,6 +44,10 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     filings = edgar_filings.list_filings(cik)
     accessions = edgar_filings.select_for_snapshot(filings)
     edgar_filings.ingest(conn, cik, filings, accessions, filings.attrs.get("name", ""))
+    try:
+        accessions = accessions + transcripts.ingest(conn, cik, ticker)
+    except (fmp.FMPError, httpx.HTTPError, ValueError) as e:  # transcripts are optional input
+        log.warning("transcripts unavailable for %s: %s", ticker, e)
 
     tag_map = periods.load_tag_map()
     series = periods.build_series(facts, tag_map)

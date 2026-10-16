@@ -90,3 +90,13 @@ def load(conn: psycopg.Connection, cik: int) -> dict:
             ["report_date", "eps_actual", "eps_estimated", "revenue_actual", "revenue_estimated"])
     pt = q("SELECT fetched_at, consensus, median, high, low FROM price_targets WHERE cik = %s ORDER BY fetched_at", ["fetched_at", "consensus", "median", "high", "low"])
     return {"estimates": est, "surprises": sur, "price_targets": pt}
+
+
+def fetch_transcript_dates(ticker: str) -> list[dict]:
+    """[{quarter, fiscalYear, date}], newest first, in the company's own fiscal convention."""
+    return get("earning-call-transcript-dates", symbol=ticker.upper().replace("-", "."))
+
+
+def fetch_transcript(ticker: str, year: int, quarter: int) -> dict | None:
+    rows = get("earning-call-transcript", symbol=ticker.upper().replace("-", "."), year=year, quarter=quarter)
+    return rows[0] if rows else None

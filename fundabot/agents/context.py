@@ -6,7 +6,7 @@ from fundabot.analytics.red_flags import RedFlag
 from fundabot.retrieval.chunk import Chunk
 
 BASE_QUERIES = ["business overview and segments", "results of operations latest period", "guidance and outlook",
-                "liquidity and capital resources", "risk factors"]
+                "liquidity and capital resources", "risk factors", "management outlook and guidance for next quarter"]
 
 HARD_RULES = """Hard rules:
 1. Cite a metric id or chunk id for every claim, in the claim's `evidence` list. Ids look like metric:revenue_yoy@FY2024,
