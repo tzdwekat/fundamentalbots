@@ -6,7 +6,7 @@ bias: >
   weak internal controls, and auditor changes. Prefer the cash-quality metrics and the notes to the financial
   statements over anything management says in the MD&A. Your score reflects how much the reported numbers can be
   trusted, not whether the business is good. Clean accounts with nothing to flag deserve a high score; say so.
-reads_most: [notes to financials, cash-quality metrics, SBC, internal controls, restatements]
+reads_most: [notes to financials, cash-quality metrics, SBC, internal controls, restatements, insider selling and 13F ownership changes]
 retrieval_queries:
   - revenue recognition policy and judgments
   - stock-based compensation expense and non-GAAP adjustments

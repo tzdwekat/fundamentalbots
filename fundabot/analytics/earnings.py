@@ -11,8 +11,11 @@ from fundabot.analytics.metrics import Metric
 
 FLAGS = ["vendor_fmp"]
 IDS = ["eps_surprise", "revenue_surprise", "eps_beat_streak", "eps_estimate_next_fy", "revenue_estimate_next_fy", "eps_actual_fmp_ttm",
-       "eps_growth_consensus_next_fy", "forward_pe", "price_target_upside", "eps_estimate_revision_30d", "eps_estimate_revision_90d"]
-UNITS = {"eps_estimate_next_fy": "USD/share", "revenue_estimate_next_fy": "USD", "eps_actual_fmp_ttm": "USD/share", "eps_beat_streak": "count"}
+       "eps_growth_consensus_next_fy", "forward_pe", "price_target_upside", "eps_estimate_revision_30d", "eps_estimate_revision_90d",
+       "eps_estimate_next_q", "revenue_estimate_next_q", "eps_estimate_next_q_revision_30d", "eps_estimate_next_q_revision_90d",
+       "inst_holders_change_pct", "inst_shares_change_pct", "insider_net_shares_90d", "insider_buy_sell_ratio"]
+UNITS = {"eps_estimate_next_fy": "USD/share", "revenue_estimate_next_fy": "USD", "eps_actual_fmp_ttm": "USD/share", "eps_beat_streak": "count",
+         "eps_estimate_next_q": "USD/share", "revenue_estimate_next_q": "USD", "insider_net_shares_90d": "shares"}
 
 
 def _m(mid, period, value, formula, inputs=None, reason=None):
@@ -32,8 +35,9 @@ def _label(report_date: date, fye, offset) -> str:
 
 def compute_earnings_metrics(fmp: dict, as_of: date, price: float | None, fye: tuple[int, int], fy_offset: int, latest_fetch: datetime | None) -> list[Metric]:
     sur = fmp["surprises"].dropna(subset=["eps_actual"]).sort_values("report_date").tail(4)
-    est = fmp["estimates"]
-    est = est[est.period == "annual"] if len(est) else est
+    all_est = fmp["estimates"]
+    est = all_est[all_est.period == "annual"] if len(all_est) else all_est
+    qest = all_est[all_est.period == "quarter"] if len(all_est) else all_est
     if sur.empty and est.empty:
         return [_m(mid, "current", None, mid, reason="no_coverage") for mid in IDS]
     out = []
@@ -88,6 +92,53 @@ def compute_earnings_metrics(fmp: dict, as_of: date, price: float | None, fye: t
                               {**inp, "older_fetch": str(old.fetched_at), "older_eps_avg": old.eps_avg}))
             else:
                 out.append(_m(mid, "current", None, mid, inp, "no_history"))
+
+    # Next quarter consensus (quarterly estimates are an FMP Ultimate feature).
+    latest_q = qest[qest.fetched_at == latest_fetch] if latest_fetch is not None and len(qest) else qest.iloc[0:0]
+    nq = latest_q[latest_q.period_end > as_of].sort_values("period_end").head(1)
+    if nq.empty:
+        for mid in ("eps_estimate_next_q", "revenue_estimate_next_q", "eps_estimate_next_q_revision_30d", "eps_estimate_next_q_revision_90d"):
+            out.append(_m(mid, "current", None, mid, reason="no_coverage"))
+    else:
+        n = nq.iloc[0]
+        inp = {"period_end": str(n.period_end), "fetched_at": str(n.fetched_at)}
+        out.append(_m("eps_estimate_next_q", "current", n.eps_avg, "FMP consensus EPS avg, next fiscal quarter", inp))
+        out.append(_m("revenue_estimate_next_q", "current", n.revenue_avg, "FMP consensus revenue avg, next fiscal quarter", inp))
+        for days, mid in ((30, "eps_estimate_next_q_revision_30d"), (90, "eps_estimate_next_q_revision_90d")):
+            target = latest_fetch - timedelta(days=days)
+            hist = qest[(qest.period_end == n.period_end) & (qest.fetched_at != latest_fetch)].copy()
+            if len(hist):
+                hist["gap"] = (hist.fetched_at - target).abs()
+                hist = hist[hist.gap <= timedelta(days=7)].sort_values("gap")
+            if len(hist) and hist.iloc[0].eps_avg:
+                old = hist.iloc[0]
+                out.append(_m(mid, "current", n.eps_avg / old.eps_avg - 1, f"next-quarter eps_avg now / eps_avg fetched ~{days}d earlier - 1",
+                              {**inp, "older_fetch": str(old.fetched_at), "older_eps_avg": old.eps_avg}))
+            else:
+                out.append(_m(mid, "current", None, mid, inp, "no_history"))
+
+    # Institutional (13F summary) and insider activity.
+    inst = fmp.get("institutional")
+    inst = inst.sort_values("quarter_end").tail(1) if inst is not None and len(inst) else None
+    if inst is None or inst.empty:
+        out += [_m(mid, "current", None, mid, reason="no_coverage") for mid in ("inst_holders_change_pct", "inst_shares_change_pct")]
+    else:
+        r = inst.iloc[0]
+        inp = {"quarter_end": str(r.quarter_end)}
+        for mid, cur_v, chg in (("inst_holders_change_pct", r.holders, r.holders_change), ("inst_shares_change_pct", r.shares, r.shares_change)):
+            prev = (cur_v - chg) if cur_v is not None and chg is not None and not pd.isna(cur_v) and not pd.isna(chg) else None
+            out.append(_m(mid, "current", (chg / prev) if prev else None, "change / prior-quarter level (FMP 13F summary)", {**inp, "level": cur_v, "change": chg},
+                          None if prev else ("nonpositive_denominator" if prev == 0 else "no_coverage")))
+    ins = fmp.get("insiders")
+    ins = ins.sort_values(["year", "quarter"]).tail(1) if ins is not None and len(ins) else None
+    if ins is None or ins.empty:
+        out += [_m(mid, "current", None, mid, reason="no_coverage") for mid in ("insider_net_shares_90d", "insider_buy_sell_ratio")]
+    else:
+        r = ins.iloc[0]
+        inp = {"year": int(r.year), "quarter": int(r.quarter), "acquired": r.acquired, "disposed": r.disposed, "purchases": r.purchases, "sales": r.sales}
+        out.append(_m("insider_net_shares_90d", "current", (r.acquired or 0) - (r.disposed or 0), "acquired - disposed shares, latest quarter (FMP insider statistics)", inp))
+        out.append(_m("insider_buy_sell_ratio", "current", (r.purchases / r.sales) if r.sales else None, "purchase transactions / sale transactions, latest quarter", inp,
+                      None if r.sales else "nonpositive_denominator"))
 
     # Price target.
     pt = fmp["price_targets"].sort_values("fetched_at").tail(1)

@@ -25,12 +25,34 @@ def get(path: str, **params) -> list | dict:
     return r.json()
 
 
+def _last_two_quarters(today: date | None = None) -> list[tuple[int, int]]:
+    d = today or date.today()
+    q = (d.month - 1) // 3 + 1  # current calendar quarter; 13F data lags, so ask for the two completed ones
+    out = []
+    y, qq = d.year, q
+    for _ in range(2):
+        qq -= 1
+        if qq == 0:
+            y, qq = y - 1, 4
+        out.append((y, qq))
+    return out
+
+
 def fetch_all(ticker: str) -> dict:
     t = ticker.upper().replace("-", ".")  # FMP uses BRK.B style
+    inst = []
+    for y, q in _last_two_quarters():
+        try:
+            inst += get("institutional-ownership/symbol-positions-summary", symbol=t, year=y, quarter=q)
+        except FMPError:
+            pass
     return {
         "estimates_annual": get("analyst-estimates", symbol=t, period="annual", limit=5),
-        "earnings": get("earnings", symbol=t),  # unbounded; limit > 5 is a premium parameter on this plan
+        "estimates_quarter": get("analyst-estimates", symbol=t, period="quarter", limit=8),
+        "earnings": get("earnings", symbol=t),
         "price_target": get("price-target-consensus", symbol=t),
+        "institutional": inst,
+        "insider_stats": get("insider-trading/statistics", symbol=t),
     }
 
 
@@ -60,10 +82,21 @@ def parse_price_target(rows: list | dict) -> dict | None:
 def ingest(conn: psycopg.Connection, cik: int, ticker: str, fetched_at: datetime | None = None) -> datetime:
     raw = fetch_all(ticker)
     fetched_at = fetched_at or datetime.now(timezone.utc)
-    execute_values(conn, "INSERT INTO estimates (cik, fetched_at, period, period_end, revenue_avg, revenue_low, revenue_high, eps_avg, eps_low, eps_high, analysts) "
-                   "VALUES (%s,%s,'annual',%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                   [(cik, fetched_at, e["period_end"], e["revenue_avg"], e["revenue_low"], e["revenue_high"], e["eps_avg"], e["eps_low"], e["eps_high"], e["analysts"])
-                    for e in parse_estimates(raw["estimates_annual"])])
+    for period, key in (("annual", "estimates_annual"), ("quarter", "estimates_quarter")):
+        execute_values(conn, "INSERT INTO estimates (cik, fetched_at, period, period_end, revenue_avg, revenue_low, revenue_high, eps_avg, eps_low, eps_high, analysts) "
+                       "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                       [(cik, fetched_at, period, e["period_end"], e["revenue_avg"], e["revenue_low"], e["revenue_high"], e["eps_avg"], e["eps_low"], e["eps_high"], e["analysts"])
+                        for e in parse_estimates(raw.get(key) or [])])
+    execute_values(conn, "INSERT INTO institutional (cik, quarter_end, holders, holders_change, shares, shares_change, fetched_at) VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                   "ON CONFLICT (cik, quarter_end) DO UPDATE SET holders = EXCLUDED.holders, holders_change = EXCLUDED.holders_change, shares = EXCLUDED.shares, "
+                   "shares_change = EXCLUDED.shares_change, fetched_at = EXCLUDED.fetched_at",
+                   [(cik, _d(r["date"]), r.get("investorsHolding"), r.get("investorsHoldingChange"), r.get("numberOf13Fshares"), r.get("numberOf13FsharesChange"), fetched_at)
+                    for r in raw.get("institutional") or [] if r.get("date")])
+    execute_values(conn, "INSERT INTO insiders (cik, year, quarter, acquired, disposed, purchases, sales, fetched_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+                   "ON CONFLICT (cik, year, quarter) DO UPDATE SET acquired = EXCLUDED.acquired, disposed = EXCLUDED.disposed, purchases = EXCLUDED.purchases, "
+                   "sales = EXCLUDED.sales, fetched_at = EXCLUDED.fetched_at",
+                   [(cik, int(r["year"]), int(r["quarter"]), r.get("totalAcquired"), r.get("totalDisposed"), r.get("totalPurchases"), r.get("totalSales"), fetched_at)
+                    for r in raw.get("insider_stats") or [] if r.get("year")])
     execute_values(conn, "INSERT INTO surprises (cik, report_date, eps_actual, eps_estimated, revenue_actual, revenue_estimated) VALUES (%s,%s,%s,%s,%s,%s) "
                    "ON CONFLICT (cik, report_date) DO UPDATE SET eps_actual = EXCLUDED.eps_actual, eps_estimated = EXCLUDED.eps_estimated, "
                    "revenue_actual = EXCLUDED.revenue_actual, revenue_estimated = EXCLUDED.revenue_estimated",
@@ -81,7 +114,7 @@ def load(conn: psycopg.Connection, cik: int) -> dict:
             cur.execute(sql, (cik,))
             df = pd.DataFrame(cur.fetchall(), columns=cols)
         for c in df.columns:
-            if c not in ("fetched_at", "period", "period_end", "report_date"):
+            if c not in ("fetched_at", "period", "period_end", "report_date", "quarter_end"):
                 df[c] = pd.to_numeric(df[c])  # numeric columns arrive as Decimal
         return df
     est = q("SELECT fetched_at, period, period_end, revenue_avg, revenue_low, revenue_high, eps_avg, eps_low, eps_high, analysts FROM estimates WHERE cik = %s ORDER BY fetched_at, period_end",
@@ -89,7 +122,11 @@ def load(conn: psycopg.Connection, cik: int) -> dict:
     sur = q("SELECT report_date, eps_actual, eps_estimated, revenue_actual, revenue_estimated FROM surprises WHERE cik = %s ORDER BY report_date",
             ["report_date", "eps_actual", "eps_estimated", "revenue_actual", "revenue_estimated"])
     pt = q("SELECT fetched_at, consensus, median, high, low FROM price_targets WHERE cik = %s ORDER BY fetched_at", ["fetched_at", "consensus", "median", "high", "low"])
-    return {"estimates": est, "surprises": sur, "price_targets": pt}
+    inst = q("SELECT quarter_end, holders, holders_change, shares, shares_change FROM institutional WHERE cik = %s ORDER BY quarter_end",
+             ["quarter_end", "holders", "holders_change", "shares", "shares_change"])
+    ins = q("SELECT year, quarter, acquired, disposed, purchases, sales FROM insiders WHERE cik = %s ORDER BY year, quarter",
+            ["year", "quarter", "acquired", "disposed", "purchases", "sales"])
+    return {"estimates": est, "surprises": sur, "price_targets": pt, "institutional": inst, "insiders": ins}
 
 
 def fetch_transcript_dates(ticker: str) -> list[dict]:

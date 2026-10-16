@@ -16,7 +16,9 @@ GROUPS = {
     "intrinsic_value": ["dcf_bear", "dcf_base", "dcf_bull", "reverse_dcf_implied_growth"],
     "earnings_signals (consensus, FMP)": ["eps_surprise", "revenue_surprise", "eps_beat_streak", "eps_actual_fmp_ttm", "eps_estimate_next_fy",
                                           "eps_growth_consensus_next_fy", "forward_pe", "revenue_estimate_next_fy", "price_target_upside",
-                                          "eps_estimate_revision_30d", "eps_estimate_revision_90d", "guidance_direction", "management_tone"],
+                                          "eps_estimate_revision_30d", "eps_estimate_revision_90d", "eps_estimate_next_q", "revenue_estimate_next_q",
+                                          "eps_estimate_next_q_revision_30d", "guidance_direction", "management_tone",
+                                          "inst_holders_change_pct", "inst_shares_change_pct", "insider_net_shares_90d", "insider_buy_sell_ratio"],
 }
 
 
@@ -32,7 +34,7 @@ def fmt(m: Metric) -> str:
         s = f"{v:.0f}"
     elif m.unit == "USD/share":
         s = f"{v:,.2f}"
-    elif any(k in m.metric_id for k in ("margin", "yoy", "cagr", "yield", "to_assets", "to_revenue", "percentile", "growth", "surprise", "upside", "revision")) or m.metric_id in ("roe", "roa", "roic", "accruals_ratio"):
+    elif any(k in m.metric_id for k in ("margin", "yoy", "cagr", "yield", "to_assets", "to_revenue", "percentile", "growth", "surprise", "upside", "revision", "change_pct")) or m.metric_id in ("roe", "roa", "roic", "accruals_ratio"):
         s = f"{v:.1%}"
     else:
         s = f"{v:,.2f}"
