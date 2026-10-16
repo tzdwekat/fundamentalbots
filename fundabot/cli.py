@@ -318,5 +318,21 @@ def schedule(action: str = typer.Argument(..., help="install | uninstall | statu
         raise typer.BadParameter("action must be install, uninstall or status")
 
 
+@app.command()
+def calibrate(horizon: str = "30,90,180"):
+    """Score past verdicts against forward returns and the next earnings surprise."""
+    import json
+
+    from fundabot.db.session import connect
+    from fundabot.eval import calibration
+
+    horizons = tuple(int(h) for h in horizon.split(",") if h.strip())
+    for h, stats in calibration.run(connect(), horizons=horizons).items():
+        if stats.get("insufficient_history"):
+            typer.echo(f"{h}d: insufficient history (n={stats['n']}, need 10)")
+        else:
+            typer.echo(f"{h}d: n={stats['n']} " + json.dumps({k: v for k, v in stats.items() if k not in ('insufficient_history', 'n')}, default=lambda x: round(x, 3) if isinstance(x, float) else x))
+
+
 if __name__ == "__main__":
     app()
