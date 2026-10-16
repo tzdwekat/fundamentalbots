@@ -1,5 +1,7 @@
 """Per-ticker pipeline. prepare() = ingest -> snapshot -> metrics -> flags. Agent stages are added later."""
 import logging
+import time
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -26,6 +28,14 @@ def _guidance_label(fye, offset):
     return label
 
 
+@contextmanager
+def _stage(ticker: str, name: str):
+    """INFO-level wall time per pipeline stage, so a slow run can be attributed from the log."""
+    t0 = time.monotonic()
+    yield
+    log.info("%s: %s took %.0fs", ticker, name, time.monotonic() - t0)
+
+
 async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
     """Extract guidance for the snapshot's transcripts that have none yet, then refresh the snapshot's guidance metrics. Returns extractions made."""
     from fundabot.analytics import guidance as guidance_mod
@@ -43,7 +53,8 @@ async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
         sections = edgar_filings.load_sections(conn, k)
         if "call" in sections:
             try:
-                await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
+                with _stage(s["ticker"], f"guidance {k}"):
+                    await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
                 made += 1
             except Exception as e:  # guidance is optional input; a failed extraction must not stop the analysis
                 log.warning("guidance extraction failed for %s %s: %s", s["ticker"], k, e)
@@ -140,11 +151,14 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     adapters = adapter if isinstance(adapter, list) else [adapter]
     from fundabot.retrieval.query import embed_missing, load_chunks
 
-    sid = prepare(conn, ticker, force=force)
+    with _stage(ticker, "prepare"):
+        sid = prepare(conn, ticker, force=force)
     if guidance_adapter is not None:
-        await ensure_guidance(conn, sid, guidance_adapter)
+        with _stage(ticker, "guidance"):
+            await ensure_guidance(conn, sid, guidance_adapter)
     s = snapshot.load(conn, sid)
-    embed_missing(conn, embedder, s["accessions"])
+    with _stage(ticker, "embed"):
+        embed_missing(conn, embedder, s["accessions"])
     if rerun:
         with conn.cursor() as cur:
             for a in adapters:
@@ -170,11 +184,14 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     from fundabot.report.render import render_verdict
     from fundabot.retrieval.query import embed_missing, load_chunks
 
-    sid = prepare(conn, ticker, force=force)
+    with _stage(ticker, "prepare"):
+        sid = prepare(conn, ticker, force=force)
     if guidance_adapter is not None:
-        await ensure_guidance(conn, sid, guidance_adapter)
+        with _stage(ticker, "guidance"):
+            await ensure_guidance(conn, sid, guidance_adapter)
     s = snapshot.load(conn, sid)
-    embed_missing(conn, embedder, s["accessions"])
+    with _stage(ticker, "embed"):
+        embed_missing(conn, embedder, s["accessions"])
     if rerun:
         with conn.cursor() as cur:
             for table in ("analyses", "rebuttals", "judgements", "verdicts"):
@@ -184,7 +201,8 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     from fundabot.agents.runner import load_analyses
 
     before = {(a["persona"], a["provider"], a["model"]) for a in load_analyses(conn, sid)}
-    analyses = await run_grid(conn, sid, personas, adapters, embedder)
+    with _stage(ticker, "grid"):
+        analyses = await run_grid(conn, sid, personas, adapters, embedder)
     if {(a["persona"], a["provider"], a["model"]) for a in analyses} - before:
         # new cells joined the pool: cached rebuttals and judgements never saw their claims
         with conn.cursor() as cur:
@@ -199,7 +217,8 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
         return eid in claims.evidence_text([eid], metrics, chunks_by_id, accessions)
 
     pool = claims.build_pool(analyses)
-    rebuttals = await rebuttal.run_rebuttals(conn, sid, analyses, pool, {a.provider: a for a in adapters}, embedder, metrics, chunks_by_id, accessions)
+    with _stage(ticker, "rebuttal"):
+        rebuttals = await rebuttal.run_rebuttals(conn, sid, analyses, pool, {a.provider: a for a in adapters}, embedder, metrics, chunks_by_id, accessions)
     pool, revised = rebuttal.apply_rebuttals(pool, rebuttals, resolvable)
     for a in analyses:
         revised.setdefault(a["agent"], (a["grounded"]["score"], a["grounded"]["confidence"]))
@@ -208,10 +227,11 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     ids = sorted({e for c in judged for e in c["evidence"]} | {e for c in judged for r in c["refutations"] for e in r["evidence"]})
     earnings_available = any("vendor_fmp" in m.flags and m.value is not None for m in metrics)
     message = judge.build_message(judged, flags, metrics, earnings_available, claims.evidence_text(ids, metrics, chunks_by_id, accessions), revised)
-    round1 = await judge.run_judges(conn, sid, judges, message)
-    if not round1:
-        raise RuntimeError(f"{ticker}: no judge succeeded; no verdict produced")
-    reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(round1) > 1 else round1
+    with _stage(ticker, "judges"):
+        round1 = await judge.run_judges(conn, sid, judges, message)
+        if not round1:
+            raise RuntimeError(f"{ticker}: no judge succeeded; no verdict produced")
+        reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(round1) > 1 else round1
     means = judge.mean_scores(reconciled, [c["id"] for c in judged])
     implied = [scoring.implied_composite(judged, j["output"], revised) for j in reconciled]
     cells = {(a["persona"], a["provider"]): {"score": a["grounded"]["score"], "confidence": a["grounded"]["confidence"],

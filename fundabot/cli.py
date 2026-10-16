@@ -5,7 +5,10 @@ app = typer.Typer(help="Fundabot: sourced fundamental analysis.", no_args_is_hel
 
 @app.callback()
 def _root():
-    pass
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("fundabot").setLevel(logging.INFO)
 
 
 @app.command("init-db")
