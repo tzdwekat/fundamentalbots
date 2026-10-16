@@ -177,5 +177,89 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
             typer.echo(f"{t.upper()}: ERROR {type(e).__name__}: {e}", err=True)
 
 
+watch_app = typer.Typer(help="Manage the watchlist.")
+app.add_typer(watch_app, name="watch")
+
+
+@watch_app.command("add")
+def watch_add(tickers: list[str], note: str = ""):
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import watchlist
+
+    typer.echo("added: " + ", ".join(watchlist.add(connect(), tickers, note)))
+
+
+@watch_app.command("remove")
+def watch_remove(tickers: list[str]):
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import watchlist
+
+    watchlist.remove(connect(), tickers)
+    typer.echo("removed: " + ", ".join(t.upper() for t in tickers))
+
+
+@watch_app.command("list")
+def watch_list():
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import watchlist
+
+    for e in watchlist.entries(connect()):
+        typer.echo(f"{e['ticker']:<8} cik {e['cik']:<10} added {e['added_at']:%Y-%m-%d}  last poll {e['last_poll'] or '-'}  {e['note'] or ''}")
+
+
+def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-sonnet-5-5", judges: int = 3):
+    """A runner that opens its own DB connection per ticker (connections are not safe to share across concurrent tickers)."""
+    import json
+    from pathlib import Path
+
+    from fundabot.db.session import connect
+    from fundabot.orchestrate.pipeline import analyze as run, analyze_full
+    from fundabot.retrieval.embed import OpenAIEmbedder
+
+    adapters, judge_adapters = build_adapters(full, providers, model, judges)
+    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 4000)
+
+    async def runner(ticker: str, full_run: bool) -> dict:
+        conn = connect()
+        try:
+            if full_run:
+                html = await analyze_full(conn, ticker, PERSONAS_ALL, adapters, judge_adapters, OpenAIEmbedder(), out_dir=Path("reports"), guidance_adapter=guidance_adapter)
+            else:
+                html = await run(conn, ticker, PERSONAS_ALL, adapters, OpenAIEmbedder(), out_dir=Path("reports"), guidance_adapter=guidance_adapter)
+            with conn.cursor() as cur:
+                cur.execute("SELECT verdict->>'composite_score', verdict->>'dispersion' FROM verdicts WHERE snapshot_id = (SELECT id FROM snapshots WHERE ticker = %s ORDER BY created_at DESC LIMIT 1) AND run_kind = 'full'", (ticker.upper(),))
+                row = cur.fetchone()
+            return {"composite": float(row[0]) if row else None, "dispersion": float(row[1]) if row else None, "report": str(html)}
+        finally:
+            conn.close()
+    return runner
+
+
+PERSONAS_ALL = ["bull", "bear", "skeptic", "quality", "macro"]
+
+
+@app.command()
+def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str = "", full: bool = False, max_usd: float = 100.0,
+         providers: str = "anthropic", concurrency: int = 3):
+    """Analyze many tickers (cheap run by default, --full for the debate), stalest first, under a per-scan budget."""
+    import asyncio
+
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import watchlist
+
+    conn = connect()
+    names = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if watchlist_flag:
+        names += [e["ticker"] for e in watchlist.entries(conn) if e["ticker"] not in names]
+    if not names:
+        raise typer.BadParameter("give --watchlist or --tickers A,B")
+    results = asyncio.run(watchlist.scan(conn, names, full, max_usd, scan_runner(full, providers), concurrency))
+    for r in results:
+        if r["status"] == "ok":
+            typer.echo(f"{r['ticker']:<8} ok   composite {r.get('composite')}  dispersion {r.get('dispersion')}  {r.get('report')}")
+        else:
+            typer.echo(f"{r['ticker']:<8} {r['status']}  {r['error']}")
+
+
 if __name__ == "__main__":
     app()
