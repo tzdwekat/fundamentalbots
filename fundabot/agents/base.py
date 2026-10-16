@@ -40,6 +40,14 @@ def month_spend(conn: psycopg.Connection) -> float:
 Call = tuple[Adapter, str, str, str, dict]  # (adapter, persona, system, user, schema)
 
 
+def check_budget(conn: psycopg.Connection, planned: list[tuple]) -> None:
+    """Fail closed before a round starts: `planned` holds (adapter, system, user) for every call the round will make."""
+    spent = month_spend(conn)
+    estimate = sum(a.estimate_cost(len(s) + len(u)) for a, s, u in planned)
+    if planned and spent + estimate >= settings.fundabot_monthly_budget_usd:
+        raise BudgetExceeded(f"month spend ${spent:.2f} + est ${estimate:.2f} exceeds budget ${settings.fundabot_monthly_budget_usd:.2f}")
+
+
 async def run_batch(conn: psycopg.Connection, snapshot_id: str, calls: list[Call]) -> list[CompletionResult | Exception]:
     """Budget check for the whole batch (fail closed), concurrent calls, then one model_calls row per success.
     The DB connection is used only before and after the gather. Failures come back as exceptions in position."""

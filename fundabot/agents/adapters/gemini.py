@@ -17,7 +17,12 @@ PRICES = {  # USD per million tokens (input, output) for prompts <= 200k, ai.goo
 }
 RETRYABLE = ("429", "500", "502", "503", "504", "timeout", "deadline", "unavailable", "resource exhausted", "resource_exhausted")
 RETRY_IN = re.compile(r"retry in ([\d.]+)s", re.I)
-_lock = asyncio.Lock()  # free-tier quotas are per minute: one Gemini call in flight at a time
+_locks: dict = {}  # one Lock per event loop (the CLI runs one loop per ticker); free-tier quotas are per minute
+
+
+def _lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    return _locks.setdefault(loop, asyncio.Lock())
 
 
 class GeminiAdapter:
@@ -25,6 +30,8 @@ class GeminiAdapter:
 
     def __init__(self, model: str = "gemini-3.8-flash", max_tokens: int = 8000):  # pro tiers need billing enabled on the Gemini key
         self.model, self.max_tokens = model, max_tokens
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
         self._client = genai.Client(api_key=settings.gemini_api_key, http_options=types.HttpOptions(timeout=180_000))
 
     @staticmethod
@@ -39,7 +46,7 @@ class GeminiAdapter:
         t0 = time.monotonic()
         config = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", response_json_schema=schema,
                                              max_output_tokens=self.max_tokens)
-        async with _lock:
+        async with _lock():  # one Gemini call in flight at a time
             for attempt in range(5):
                 try:
                     r = await self._client.aio.models.generate_content(model=self.model, contents=user, config=config)

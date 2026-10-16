@@ -81,3 +81,13 @@ def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions:
     g["stats"] = {"claims_total": len(output["claims"]), "claims_dropped": len(dropped), "numbers_total": n_total,
                   "numbers_unsupported": n_unsupported, "hallucination_rate": (n_unsupported / n_total) if n_total else 0.0}
     return g
+
+
+def unsupported_numbers(text: str, metrics: list[Metric], chunks: list[Chunk]) -> list[str]:
+    """Numbers in free text (e.g. a judge summary) that match neither a shown metric nor a retrieved chunk."""
+    from fundabot.agents.context import select_periods
+
+    shown = select_periods(metrics)
+    values = [m.value for m in metrics if m.value is not None and m.period in shown]
+    chunk_values = [v for c in chunks for _, v in extract_numbers(c.text)]
+    return [t for t, v in extract_numbers(text) if not _supported(t, v, values, chunk_values)]

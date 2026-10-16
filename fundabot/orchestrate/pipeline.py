@@ -3,6 +3,7 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
+import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
@@ -50,7 +51,7 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     val = valuation.compute_valuation(series, facts, prices_df, filings, as_of, fundamentals)
     try:
         fmp.ingest(conn, cik, ticker)
-    except fmp.FMPError as e:
+    except (fmp.FMPError, httpx.HTTPError, ValueError) as e:  # vendor outage must not fail the run; metrics degrade to no_coverage
         log.warning("FMP unavailable for %s: %s", ticker, e)
     fmp_data = fmp.load(conn, cik)
     latest_fetch = fmp_data["estimates"].fetched_at.max() if len(fmp_data["estimates"]) else None
@@ -103,6 +104,7 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     """Grid -> rebuttal -> three judges + reconcile -> scoring -> verdict report. Every round is cached per snapshot."""
     from fundabot.agents.runner import run_grid
     from fundabot.debate import claims, judge, rebuttal, scoring
+    from fundabot.eval import grounding
     from fundabot.report.render import render_verdict
     from fundabot.retrieval.query import embed_missing, load_chunks
 
@@ -115,7 +117,16 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
                 cur.execute(f"DELETE FROM {table} WHERE snapshot_id = %s", (sid,))
         conn.commit()
 
+    from fundabot.agents.runner import load_analyses
+
+    before = {(a["persona"], a["provider"], a["model"]) for a in load_analyses(conn, sid)}
     analyses = await run_grid(conn, sid, personas, adapters, embedder)
+    if {(a["persona"], a["provider"], a["model"]) for a in analyses} - before:
+        # new cells joined the pool: cached rebuttals and judgements never saw their claims
+        with conn.cursor() as cur:
+            for table in ("rebuttals", "judgements", "verdicts"):
+                cur.execute(f"DELETE FROM {table} WHERE snapshot_id = %s", (sid,))
+        conn.commit()
     metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
     chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
     accessions = s["accessions"]
@@ -134,13 +145,18 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     earnings_available = any("vendor_fmp" in m.flags and m.value is not None for m in metrics)
     message = judge.build_message(judged, flags, metrics, earnings_available, claims.evidence_text(ids, metrics, chunks_by_id, accessions), revised)
     round1 = await judge.run_judges(conn, sid, judges, message)
-    reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(judges) > 1 else round1
+    if not round1:
+        raise RuntimeError(f"{ticker}: no judge succeeded; no verdict produced")
+    reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(round1) > 1 else round1
     means = judge.mean_scores(reconciled, [c["id"] for c in judged])
     implied = [scoring.implied_composite(judged, j["output"], revised) for j in reconciled]
     cells = {(a["persona"], a["provider"]): {"score": a["grounded"]["score"], "confidence": a["grounded"]["confidence"],
                                              "hallucination_rate": a["grounded"]["stats"]["hallucination_rate"], "model": a["model"]} for a in analyses}
-    catalysts = claims.dedupe([c for j in reconciled for c in j["output"]["catalysts"]], embedder, key="what")
+    raw_catalysts = [{**c, "evidence": [e for e in c["evidence"] if resolvable(e)]} for j in reconciled for c in j["output"]["catalysts"]]
+    catalysts = claims.dedupe([c for c in raw_catalysts if c["evidence"]], embedder, key="what")  # a catalyst with no real evidence is dropped
     verdict = scoring.build_verdict(ticker.upper(), sid, judged, revised, means, reconciled, implied, cells, catalysts, [f.to_dict() for f in flags])
+    verdict["summary_unsupported"] = {j["provider"]: grounding.unsupported_numbers(j["output"]["one_paragraph_summary"], metrics, list(chunks_by_id.values()))
+                                      for j in reconciled}
     verdict["providers"] = [a.provider for a in adapters]
     verdict["judges"] = [{"provider": j["provider"], "model": j["model"]} for j in reconciled]
     with conn.cursor() as cur:

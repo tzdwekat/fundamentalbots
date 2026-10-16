@@ -48,7 +48,7 @@ def test_judge_message_states_missing_consensus():
     assert "CONSENSUS_DATA" in msg2 and "eps_surprise" in msg2 and "unavailable" not in msg2
     assert "do not form a thesis" in judge.system_prompt().lower() or "do not form" in judge.system_prompt().lower()
     rec = judge.build_reconcile_message(jout({"a": 3}, "mine"), [("openai", jout({"a": 5}, "theirs"))])
-    assert "YOUR_ROUND_1" in msg or "YOUR_ROUND_1" in rec and "openai" in rec and "theirs" in rec
+    assert "YOUR_ROUND_1" in rec and "openai" in rec and "theirs" in rec
 
 
 def test_mean_scores_with_missing_judge():

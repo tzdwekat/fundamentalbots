@@ -128,6 +128,18 @@ def grid(ticker: str):
 JUDGE_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-5.4", "gemini": None}  # None = the adapter's default
 
 
+def build_adapters(full: bool, providers: str, model: str, judges: int):
+    """Persona adapters for the run and judge adapters (only for --full). Missing keys fail here, loudly."""
+    provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
+    adapters = [make_adapter(p, model if p == "anthropic" else None) for p in provider_names]
+    if not full:
+        return adapters, []
+    if judges not in (1, 3):
+        raise typer.BadParameter("--judges must be 1 or 3")
+    judge_adapters = [make_adapter(p, JUDGE_MODELS[p]) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
+    return adapters, judge_adapters
+
+
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
             providers: str = "anthropic", full: bool = False, judges: int = 3,
@@ -143,9 +155,7 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
-    adapters = [make_adapter(p, model if p == "anthropic" else None) for p in provider_names]
-    judge_adapters = [make_adapter(p, JUDGE_MODELS[p]) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
+    adapters, judge_adapters = build_adapters(full, providers, model, judges)
     for t in tickers:
         try:
             if full:

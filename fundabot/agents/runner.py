@@ -6,7 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from fundabot.agents import context, personas, schemas
-from fundabot.agents.base import Adapter, run_batch
+from fundabot.agents.base import Adapter, check_budget, run_batch
 from fundabot.eval.grounding import ground
 from fundabot.orchestrate import snapshot as snap
 from fundabot.retrieval.query import load_chunks, retrieve
@@ -52,7 +52,11 @@ async def run_grid(conn: psycopg.Connection, sid: str, persona_names: list[str],
         calls = [(adapter, n, messages[n][0], messages[n][1], schemas.AGENT_OUTPUT_SCHEMA) for n in names]
         return list(zip(names, await run_batch(conn, sid, calls)))
 
-    per_provider = await asyncio.gather(*[one_provider(a) for a in adapters])
+    check_budget(conn, [(a, messages[n][0], messages[n][1]) for a in adapters for n in todo[a]])  # whole grid, before any call
+    per_provider = await asyncio.gather(*[one_provider(a) for a in adapters], return_exceptions=True)
+    for r in per_provider:
+        if isinstance(r, BaseException):
+            raise r
     chunks_by_id = load_chunks(conn, sorted({c for n in needed for c in messages[n][2]}))
     for adapter, results in zip(adapters, per_provider):
         for name, r in results:

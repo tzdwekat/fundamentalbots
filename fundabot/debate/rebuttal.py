@@ -6,7 +6,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from fundabot.agents import context, personas
-from fundabot.agents.base import run_batch
+from fundabot.agents.base import check_budget, run_batch
 from fundabot.agents.schemas import SchemaError
 from fundabot.debate import claims as claims_mod
 
@@ -95,7 +95,12 @@ async def run_rebuttals(conn, sid, analyses: list[dict], pool: list[dict], adapt
         results = await run_batch(conn, sid, [(adapter, f"rebuttal:{a['persona']}", s, u, REBUTTAL_SCHEMA) for a, s, u in items])
         return [(a, r) for (a, _, _), r in zip(items, results)]
 
-    for results in await asyncio.gather(*[one_provider(p) for p in plan]):
+    check_budget(conn, [(adapters_by_provider[p], s, u) for p, items in plan.items() for _, s, u in items])
+    gathered = await asyncio.gather(*[one_provider(p) for p in plan], return_exceptions=True)
+    for r in gathered:
+        if isinstance(r, BaseException):
+            raise r
+    for results in gathered:
         for a, r in results:
             if isinstance(r, Exception):
                 log.warning("rebuttal %s failed: %s", a["agent"], r)

@@ -5,7 +5,9 @@ snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{
 ## Summary (median judge: {{ verdict.median_judge }})
 
 {{ verdict.one_paragraph_summary }}
-
+{% if verdict.summary_unsupported and verdict.summary_unsupported.get(verdict.median_judge) %}
+> ⚠ unsupported numbers in summary: {{ verdict.summary_unsupported[verdict.median_judge]|join(", ") }}
+{% endif %}
 **Composite score: {{ verdict.composite_score }}** ({{ verdict.weighting }}{% if verdict.veto_note %}; {{ verdict.veto_note }}; uncapped {{ verdict.composite_uncapped }}{% endif %}) · dispersion {{ verdict.dispersion }} · **Judge agreement: {{ verdict.judge_agreement }}** (implied composites: {% for p, v in verdict.implied_composites.items() %}{{ p }} {{ v }}{{ ", " if not loop.last }}{% endfor %})
 
 | sub-score | 0–100 |
@@ -66,5 +68,7 @@ None: no claim was refuted and the judges agreed on every claim.
 ## Judge summaries
 
 {% for p, text in verdict.summaries.items() %}**{{ p }}:** {{ text }}
-
+{% if verdict.summary_unsupported and verdict.summary_unsupported.get(p) %}
+> ⚠ unsupported numbers in summary: {{ verdict.summary_unsupported[p]|join(", ") }}
+{% endif %}
 {% endfor %}

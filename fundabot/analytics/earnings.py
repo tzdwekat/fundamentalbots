@@ -20,9 +20,14 @@ def _m(mid, period, value, formula, inputs=None, reason=None):
 
 
 def _label(report_date: date, fye, offset) -> str:
+    """Quarter label from the report date (FMP rows carry no fiscal period): a Q4 reported well after year end rounds to
+    quarter 0 of the next year, which is Q4 of the prior year."""
     end = report_date - timedelta(days=35)
     fy_cal = periods.fy_of(end, fye)
-    return f"Q{periods.fq_of(end, fy_cal, fye)}FY{fy_cal + offset}"
+    fq = periods.fq_of(end, fy_cal, fye)
+    if fq == 0:
+        fq, fy_cal = 4, fy_cal - 1
+    return f"Q{fq}FY{fy_cal + offset}"
 
 
 def compute_earnings_metrics(fmp: dict, as_of: date, price: float | None, fye: tuple[int, int], fy_offset: int, latest_fetch: datetime | None) -> list[Metric]:
