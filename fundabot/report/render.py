@@ -6,13 +6,14 @@ from jinja2 import Environment, FileSystemLoader
 
 from fundabot.analytics.metrics import Metric
 from fundabot.analytics.valuation import DISCOUNT_RATE, TERMINAL_GROWTH, YEARS
+from fundabot.report import charts
 from fundabot.report.table import GROUPS, columns_for, fmt
 from fundabot.retrieval.chunk import Chunk
 
 ENV = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"), autoescape=False)
 CSS = "body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;line-height:1.45}" \
       "table{border-collapse:collapse;font-size:13px;margin:1em 0}td,th{border:1px solid #ccc;padding:3px 6px;text-align:right}" \
-      "th:first-child,td:first-child{text-align:left}code{background:#f4f4f4;padding:1px 3px}blockquote{color:#a40;border-left:3px solid #a40;padding-left:.6em}"
+      "th:first-child,td:first-child{text-align:left}code{background:#f4f4f4;padding:1px 3px}blockquote{color:#a40;border-left:3px solid #a40;padding-left:.6em}" + charts.VIZ_CSS
 
 
 def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir: Path) -> tuple[Path, Path]:
@@ -21,7 +22,13 @@ def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flag
     from fundabot.agents.runner import PERSONA_ORDER
 
     earnings_lines = [metric_line(m) for m in metrics if ("vendor_fmp" in m.flags or "llm_extracted" in m.flags) and m.value is not None]
-    head = ENV.get_template("verdict.md.j2").render(ticker=ticker.upper(), snapshot=snapshot, verdict=verdict, personas=PERSONA_ORDER, earnings_lines=earnings_lines)
+    cells = {tuple(k.split("/")): (c.get("score") if c else None) for k, c in verdict["grid"].items()}
+    for p in PERSONA_ORDER:
+        for pr in verdict["providers"]:
+            cells.setdefault((p, pr), None)
+    heat = '<div class="viz-root">' + charts.heatmap([p for p in PERSONA_ORDER if any(k[0] == p for k in cells)], verdict["providers"], cells) + "</div>"
+    head = ENV.get_template("verdict.md.j2").render(ticker=ticker.upper(), snapshot=snapshot, verdict=verdict, personas=PERSONA_ORDER, earnings_lines=earnings_lines,
+                                                    heatmap_html=heat)
     by_agent = {r["agent"]: r["output"] for r in rebuttals}
     for a in analyses:
         a["rebuttal"] = by_agent.get(a["agent"])
@@ -36,6 +43,27 @@ def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flag
     html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>{ticker.upper()} verdict</title><style>{CSS}</style></head><body>"
                          f"{markdown.markdown(md, extensions=['tables'])}</body></html>")
     return md_path, html_path
+
+
+def chart_block(metrics: list[Metric]) -> str:
+    """Trend lines, growth, and valuation range bars from the metrics table; wrapped for the viz tokens."""
+    lookup = {(m.metric_id, m.period): m for m in metrics}
+    fys = sorted({m.period for m in metrics if m.period.startswith("FY")})[-6:]
+    qs = sorted({m.period for m in metrics if m.period.startswith("Q")}, key=lambda p: (int(p[4:]), int(p[1])))[-8:]
+
+    def pts(mid, periods):
+        return [(p, lookup[(mid, p)].value if (mid, p) in lookup else None) for p in periods]
+    parts = ['<div class="viz-root">',
+             charts.line_chart("Revenue and free cash flow (fiscal years)", [("revenue", pts("revenue", fys)), ("fcf", pts("fcf", fys))], "usd"),
+             charts.line_chart("Margins and return on capital", [("gross margin", pts("gross_margin", fys)), ("operating margin", pts("operating_margin", fys)),
+                                                                 ("FCF margin", pts("fcf_margin", fys)), ("ROIC", pts("roic", fys))], "pct"),
+             charts.line_chart("Revenue growth, year over year (last 8 quarters)", [("revenue YoY", pts("revenue_yoy", qs))], "pct")]
+    parts.append('<p class="title" style="margin:16px 0 4px;font-weight:600">Valuation against its own 5-year range</p>')
+    for mid, label, f in (("pe", "P/E (TTM)", "x"), ("ev_ebitda", "EV / EBITDA", "x"), ("ev_sales", "EV / sales", "x"), ("fcf_yield", "FCF yield", "pct")):
+        g = lambda k: lookup[(f"{mid}_{k}", "current")].value if (f"{mid}_{k}", "current") in lookup else None
+        parts.append(charts.range_bar(label, g("5y_min"), g("5y_median"), g("5y_max"), lookup[(mid, "current")].value if (mid, "current") in lookup else None, f))
+    parts.append('<p class="muted">Valuation bars: the current value marked on the ratio\'s own 5-year range (dot = 5-year median). Values are in the metrics table below.</p></div>')
+    return "\n".join(parts)
 
 
 def _cited_ids(analyses: list[dict]) -> tuple[set[str], set[str]]:
@@ -63,7 +91,7 @@ def render_report(ticker: str, snapshot: dict, metrics: list[Metric], flags, ana
     cited_chunks = [chunks_by_id[c] for c in sorted(chunk_ids) if c in chunks_by_id]
     scores = [a["grounded"]["score"] for a in analyses]
     md = ENV.get_template("report.md.j2").render(
-        ticker=ticker, snapshot=snapshot, filings=filings, flags=flags, analyses=analyses,
+        ticker=ticker, snapshot=snapshot, filings=filings, flags=flags, analyses=analyses, charts_html=chart_block(metrics),
         mean_score=sum(scores) / len(scores) if scores else 0.0, columns=cols, metric_groups=groups,
         dcf={"discount_rate": DISCOUNT_RATE, "terminal_growth": TERMINAL_GROWTH, "years": YEARS},
         cited_metrics=cited_metrics, cited_chunks=cited_chunks,

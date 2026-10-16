@@ -82,3 +82,13 @@ async def test_rerun_flag_calls_again(fixture_prepare, tmp_path):
     await pipeline.analyze(conn, "AAPL", PERSONAS, adapter, FakeEmbedder(), out_dir=tmp_path)
     await pipeline.analyze(conn, "AAPL", PERSONAS, adapter, FakeEmbedder(), rerun=True, out_dir=tmp_path)
     assert adapter.calls == 10
+
+
+@pytest.mark.db
+async def test_report_contains_charts(fixture_prepare, tmp_path):
+    conn = fixture_prepare
+    html = await pipeline.analyze(conn, "AAPL", PERSONAS, FakeAdapter(fake_output), FakeEmbedder(), out_dir=tmp_path)
+    text = html.read_text()
+    assert "## Charts" in html.with_suffix(".md").read_text() or "Charts" in text
+    assert text.count("<svg") >= 4 and "Revenue and free cash flow" in text and "Margins and return on capital" in text and "Valuation against its own 5-year range" in text
+    assert ".viz-root" in text and "prefers-color-scheme: dark" in text

@@ -18,6 +18,10 @@ Filings in this snapshot: {% for f in filings %}{{ f.form }} filed {{ f.filed }}
 {% endfor %}
 **Unweighted mean score: {{ "%.1f"|format(mean_score) }}** (unweighted mean, no judge until Phase 3; disagreement is the point).
 
+## Charts
+
+{{ charts_html }}
+
 {% for a in analyses %}
 ## {{ a.persona|capitalize }} ({{ a.provider }}/{{ a.model }})
 

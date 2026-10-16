@@ -101,3 +101,13 @@ async def test_full_with_one_judge(fixture_prepare, fmp_fixture, tmp_path):
         cur.execute("SELECT verdict FROM verdicts WHERE run_kind = 'full'")
         v = cur.fetchone()[0]
     assert v["judge_agreement"] == 1.0 and v["median_judge"] == "anthropic" and html.exists()
+
+
+@pytest.mark.db
+async def test_verdict_report_has_heatmap(fixture_prepare, fmp_fixture, tmp_path):
+    conn = fixture_prepare
+    personas = [persona_fake(p) for p in ("anthropic", "openai")]
+    judges = [rebuttal_or_judge("anthropic")]
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
+    text = html.read_text()
+    assert 'class="cell"' in text and text.count('class="cell"') == 10 and "<svg" in text

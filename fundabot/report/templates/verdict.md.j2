@@ -19,6 +19,8 @@ snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{
 
 ## Score grid (score / confidence / unsupported numbers)
 
+{{ heatmap_html }}
+
 | persona | {{ verdict.providers|join(" | ") }} | spread |
 |---|{% for _ in verdict.providers %}---|{% endfor %}---|
 {% for persona in personas %}| {{ persona }} | {% for pr in verdict.providers %}{% set c = verdict.grid.get(persona ~ "/" ~ pr) %}{% if c %}{{ c.score }} / {{ "%.2f"|format(c.confidence) }} / {{ "%.0f"|format(c.hallucination_rate * 100) }}%{% else %}failed{% endif %} | {% endfor %}{{ "%.2f"|format(verdict.dispersion_by_persona.get(persona, 0)) }} |
