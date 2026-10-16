@@ -15,6 +15,36 @@ from fundabot.orchestrate import snapshot
 log = logging.getLogger("fundabot")
 
 
+async def ensure_guidance(conn: psycopg.Connection, sid: str, adapter) -> int:
+    """Extract guidance for the snapshot's transcripts that have none yet, then refresh the snapshot's guidance metrics. Returns extractions made."""
+    from fundabot.analytics import guidance as guidance_mod
+    from fundabot.retrieval.chunk import chunk_section
+
+    s = snapshot.load(conn, sid)
+    keys = [a for a in s["accessions"] if a.startswith("T")]
+    if not keys:
+        return 0
+    have = {r["key"] for r in guidance_mod.load(conn, s["cik"], keys)}
+    made = 0
+    for k in keys:
+        if k in have:
+            continue
+        sections = edgar_filings.load_sections(conn, k)
+        if "call" in sections:
+            await guidance_mod.extract(conn, s["cik"], k, adapter, chunk_section(k, "call", sections["call"]))
+            made += 1
+    if made:
+        rows = guidance_mod.metrics(guidance_mod.load(conn, s["cik"], keys))
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM metrics WHERE snapshot_id = %s AND metric_id IN ('guidance_direction', 'management_tone')", (sid,))
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.executemany("INSERT INTO metrics (snapshot_id, metric_id, period, value, unit, formula_id, inputs, flags, tag_used, null_reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            [(sid, m.metric_id, m.period, m.value, m.unit, m.formula_id, snapshot.jsonb(m.inputs), snapshot.jsonb(m.flags), m.tag_used, m.null_reason) for m in rows])
+        conn.commit()
+    return made
+
+
 def _recent_fetch(conn: psycopg.Connection, cik: int, max_age_hours: float = 24) -> int | None:
     with conn.cursor() as cur:
         cur.execute("SELECT id FROM raw_companyfacts WHERE cik = %s AND fetched_at > now() - make_interval(hours => %s) ORDER BY id DESC LIMIT 1",
@@ -24,6 +54,7 @@ def _recent_fetch(conn: psycopg.Connection, cik: int, max_age_hours: float = 24)
 
 
 def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
+    """Ingest -> snapshot -> metrics -> flags (no model calls; guidance metrics come from cached extractions)."""
     ticker = ticker.upper()
     cik = edgar_facts.ticker_to_cik(ticker)
     fetch_id = None if force else _recent_fetch(conn, cik)
@@ -61,6 +92,9 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     latest_fetch = fmp_data["estimates"].fetched_at.max() if len(fmp_data["estimates"]) else None
     cur_price = next((m.value for m in val if m.metric_id == "price" and m.period == "current"), None)
     earn = earnings.compute_earnings_metrics(fmp_data, as_of, cur_price, periods.fiscal_year_end(facts, tag_map), periods.fy_offset(facts, tag_map), latest_fetch)
+    from fundabot.analytics import guidance as guidance_mod
+
+    guid = guidance_mod.metrics(guidance_mod.load(conn, cik, [a for a in accessions if a.startswith("T")]))
     flags = red_flags.numeric_flags(fundamentals)
     latest_10k = next((a for a in accessions if filings[filings.accession == a].form.iloc[0] == "10-K"), None)
     if latest_10k:
@@ -70,13 +104,13 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     close = cur["price"].value if "price" in cur else None
     shares = cur["shares_outstanding"].value if "shares_outstanding" in cur else None
     sid = snapshot.create_snapshot(conn, ticker, cik, fetch_id, accessions, price_date, close, shares)
-    snapshot.store_metrics(conn, sid, fundamentals + val + earn)
+    snapshot.store_metrics(conn, sid, fundamentals + val + earn + guid)
     snapshot.store_flags(conn, sid, flags)
     return sid
 
 
 async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], adapter, embedder, force: bool = False, rerun: bool = False,
-                  out_dir: Path = Path("reports")) -> Path:
+                  out_dir: Path = Path("reports"), guidance_adapter=None) -> Path:
     """Phase 2 run over one or more providers. `adapter` may be one Adapter or a list. Cached analyses are reused unless rerun=True."""
     from fundabot.agents.runner import run_grid
     from fundabot.report.render import render_report
@@ -104,7 +138,7 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
 
 
 async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str], adapters: list, judges: list, embedder,
-                       force: bool = False, rerun: bool = False, out_dir: Path = Path("reports")) -> Path:
+                       force: bool = False, rerun: bool = False, out_dir: Path = Path("reports"), guidance_adapter=None) -> Path:
     """Grid -> rebuttal -> three judges + reconcile -> scoring -> verdict report. Every round is cached per snapshot."""
     from fundabot.agents.runner import run_grid
     from fundabot.debate import claims, judge, rebuttal, scoring
@@ -113,6 +147,8 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     from fundabot.retrieval.query import embed_missing, load_chunks
 
     sid = prepare(conn, ticker, force=force)
+    if guidance_adapter is not None:
+        await ensure_guidance(conn, sid, guidance_adapter)
     s = snapshot.load(conn, sid)
     embed_missing(conn, embedder, s["accessions"])
     if rerun:

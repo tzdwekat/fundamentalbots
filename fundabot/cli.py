@@ -67,6 +67,7 @@ def verify(ticker: str):
     typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
 
 
+GUIDANCE_MODEL = "claude-haiku-5-5"  # transcript guidance extraction, ~$0.01 per call
 JUDGE_MAX_TOKENS = 20000  # a judge scores every surviving claim (70+ on a full run) with notes
 
 
@@ -160,12 +161,14 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
     adapters, judge_adapters = build_adapters(full, providers, model, judges)
+    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 4000)
     for t in tickers:
         try:
             if full:
-                html = asyncio.run(analyze_full(conn, t, names, adapters, judge_adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
+                html = asyncio.run(analyze_full(conn, t, names, adapters, judge_adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir),
+                                                guidance_adapter=guidance_adapter))
             else:
-                html = asyncio.run(run(conn, t, names, adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir)))
+                html = asyncio.run(run(conn, t, names, adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir), guidance_adapter=guidance_adapter))
             typer.echo(f"{t.upper()}: {html}")
             if open_report:
                 webbrowser.open(html.resolve().as_uri())

@@ -20,7 +20,7 @@ def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flag
     from fundabot.agents.context import metric_line
     from fundabot.agents.runner import PERSONA_ORDER
 
-    earnings_lines = [metric_line(m) for m in metrics if "vendor_fmp" in m.flags and m.value is not None]
+    earnings_lines = [metric_line(m) for m in metrics if ("vendor_fmp" in m.flags or "llm_extracted" in m.flags) and m.value is not None]
     head = ENV.get_template("verdict.md.j2").render(ticker=ticker.upper(), snapshot=snapshot, verdict=verdict, personas=PERSONA_ORDER, earnings_lines=earnings_lines)
     by_agent = {r["agent"]: r["output"] for r in rebuttals}
     for a in analyses:

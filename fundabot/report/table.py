@@ -16,7 +16,7 @@ GROUPS = {
     "intrinsic_value": ["dcf_bear", "dcf_base", "dcf_bull", "reverse_dcf_implied_growth"],
     "earnings_signals (consensus, FMP)": ["eps_surprise", "revenue_surprise", "eps_beat_streak", "eps_actual_fmp_ttm", "eps_estimate_next_fy",
                                           "eps_growth_consensus_next_fy", "forward_pe", "revenue_estimate_next_fy", "price_target_upside",
-                                          "eps_estimate_revision_30d", "eps_estimate_revision_90d"],
+                                          "eps_estimate_revision_30d", "eps_estimate_revision_90d", "guidance_direction", "management_tone"],
 }
 
 
