@@ -121,3 +121,23 @@ async def test_gemini_adapter_honors_retry_delay_and_serializes(monkeypatch):
     results = await asyncio.gather(*[a.complete("s", "u", schemas.AGENT_OUTPUT_SCHEMA) for _ in range(3)])
     assert all(r.output == GOOD for r in results) and len(attempts) == 4
     assert max(sleeps) >= 1.5 and peak <= gmod.CONCURRENCY  # waited the server's retry delay; concurrency capped
+
+
+async def test_gemini_truncation_is_reported_not_parsed(monkeypatch):
+    a = GeminiAdapter("gemini-3.1-pro-preview")
+
+    async def fake_generate(**kw):
+        return NS(text='{"thesis": "cut off', usage_metadata=NS(prompt_token_count=10, candidates_token_count=5, thoughts_token_count=7000),
+                  candidates=[NS(finish_reason="MAX_TOKENS")])
+    monkeypatch.setattr(a._client.aio.models, "generate_content", fake_generate)
+    with pytest.raises(RuntimeError, match="max_tokens"):
+        await a.complete("s", "u", schemas.AGENT_OUTPUT_SCHEMA)
+
+
+def test_output_budgets_for_gemini_and_judges(monkeypatch):
+    from fundabot.cli import build_adapters
+
+    monkeypatch.setattr(settings, "gemini_api_key", "k")
+    adapters, judges = build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=3)
+    assert next(a for a in adapters if a.provider == "gemini").max_tokens >= 16000  # thinking tokens count against the cap
+    assert all(j.max_tokens >= 16000 for j in judges)  # ~70 scored claims plus notes exceed 8k

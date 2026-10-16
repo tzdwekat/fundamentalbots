@@ -67,16 +67,20 @@ def verify(ticker: str):
     typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
 
 
-def make_adapter(provider: str, model: str | None = None):
+JUDGE_MAX_TOKENS = 20000  # a judge scores every surviving claim (70+ on a full run) with notes
+
+
+def make_adapter(provider: str, model: str | None = None, max_tokens: int | None = None):
+    kw = {k: v for k, v in (("model", model), ("max_tokens", max_tokens)) if v}
     if provider == "anthropic":
         from fundabot.agents.adapters.anthropic import AnthropicAdapter
-        return AnthropicAdapter(model) if model else AnthropicAdapter()
+        return AnthropicAdapter(**kw)
     if provider == "openai":
         from fundabot.agents.adapters.openai import OpenAIAdapter
-        return OpenAIAdapter(model) if model else OpenAIAdapter()
+        return OpenAIAdapter(**kw)
     if provider == "gemini":
         from fundabot.agents.adapters.gemini import GeminiAdapter
-        return GeminiAdapter(model) if model else GeminiAdapter()
+        return GeminiAdapter(**kw)
     raise typer.BadParameter(f"unknown provider {provider}")
 
 
@@ -136,7 +140,7 @@ def build_adapters(full: bool, providers: str, model: str, judges: int):
         return adapters, []
     if judges not in (1, 3):
         raise typer.BadParameter("--judges must be 1 or 3")
-    judge_adapters = [make_adapter(p, JUDGE_MODELS[p]) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
+    judge_adapters = [make_adapter(p, JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
     return adapters, judge_adapters
 
 

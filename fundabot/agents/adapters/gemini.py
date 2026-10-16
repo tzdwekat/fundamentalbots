@@ -29,7 +29,7 @@ def _lock() -> asyncio.Semaphore:
 class GeminiAdapter:
     provider = "gemini"
 
-    def __init__(self, model: str = "gemini-3.1-pro-preview", max_tokens: int = 8000):
+    def __init__(self, model: str = "gemini-3.1-pro-preview", max_tokens: int = 16000):  # thinking tokens count against this cap
         self.model, self.max_tokens = model, max_tokens
         if not settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
@@ -57,8 +57,10 @@ class GeminiAdapter:
                         raise
                     m = RETRY_IN.search(str(e))
                     await asyncio.sleep(float(m.group(1)) + 1 if m else 15 * (attempt + 1))
+        reason = str(getattr(r.candidates[0], "finish_reason", "")) if getattr(r, "candidates", None) else "no candidates"
+        if "MAX_TOKENS" in reason.upper():
+            raise RuntimeError(f"output truncated at max_tokens ({self.max_tokens}, thinking included)")
         if not r.text:
-            reason = getattr(r.candidates[0], "finish_reason", "?") if getattr(r, "candidates", None) else "no candidates"
             raise RuntimeError(f"gemini returned no text: {reason}")
         um = r.usage_metadata
         out_tokens = (um.candidates_token_count or 0) + (getattr(um, "thoughts_token_count", 0) or 0)
