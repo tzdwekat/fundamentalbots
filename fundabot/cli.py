@@ -328,10 +328,35 @@ def calibrate(horizon: str = "30,90,180"):
 
     horizons = tuple(int(h) for h in horizon.split(",") if h.strip())
     for h, stats in calibration.run(connect(), horizons=horizons).items():
-        if stats.get("insufficient_history"):
+        if stats.get("error"):
+            typer.echo(f"{h}d: {stats['error']}")
+        elif stats.get("insufficient_history"):
             typer.echo(f"{h}d: insufficient history (n={stats['n']}, need 10)")
         else:
             typer.echo(f"{h}d: n={stats['n']} " + json.dumps({k: v for k, v in stats.items() if k not in ('insufficient_history', 'n')}, default=lambda x: round(x, 3) if isinstance(x, float) else x))
+
+
+@app.command()
+def review(ticker: str = typer.Argument(None), agent: str = "", vote: str = "", note: str = "", labels: bool = False, n: int = 10):
+    """List the most contested verdicts, or record a thumbs up/down for an agent's thesis: review NVDA --agent bear/openai --vote up."""
+    from fundabot.db.session import connect
+    from fundabot.eval import review as rev
+
+    conn = connect()
+    if labels:
+        for persona, provider, up, down in rev.label_counts(conn):
+            typer.echo(f"{persona:<8} {provider:<10} up {up:>3}  down {down:>3}")
+        return
+    if ticker and agent and vote:
+        typer.echo(f"recorded #{rev.label(conn, ticker, agent, vote, note)}")
+        return
+    for r in rev.contested(conn, n):
+        typer.echo(f"{r['ticker']:<6} composite {r['composite']:>5}  dispersion {r['dispersion']:.2f}  agreement {r['agreement']:.2f}  contested {r['n_contested']}  ({r['created_at']:%Y-%m-%d})")
+        c = r["top_claim"]
+        if c:
+            typer.echo(f"       {c['id']}: {c['text'][:140]}")
+            for ref in c.get("refutations", [])[:2]:
+                typer.echo(f"         refuted by {ref['by']}: {ref['reason'][:120]}")
 
 
 if __name__ == "__main__":

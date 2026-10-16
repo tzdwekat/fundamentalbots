@@ -80,3 +80,13 @@ def test_run_stores_outcomes(db_conn):
         cur.execute("SELECT count(*) FROM benchmark_prices WHERE ticker = 'SPY'"); assert cur.fetchone()[0] == 40
     assert h == 30 and abs(float(tr) - 0.30) < 1e-9 and abs(float(ex) - (0.30 - 0.15)) < 1e-9
     assert calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))[30]["n"] == 1 and fetched == ["SPY", "SPY"]  # outcome cached, SPY refreshed per run
+
+
+@pytest.mark.db
+def test_run_without_benchmark_prices_reports_cleanly(db_conn):
+    from fundabot.ingest.prices import PriceUnavailable
+
+    def fetch(ticker, years=5):
+        raise PriceUnavailable("SPY: dns")
+    stats = calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))
+    assert stats == {30: {"insufficient_history": True, "n": 0, "error": "benchmark prices unavailable: SPY: dns"}}

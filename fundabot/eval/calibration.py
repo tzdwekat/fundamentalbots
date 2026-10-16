@@ -123,7 +123,11 @@ def run(conn: psycopg.Connection, horizons=(30, 90, 180), fetch_prices=prices_mo
     from fundabot.ingest import fmp
 
     today = today or date.today()
-    spy = _benchmark(conn, fetch_prices)
+    try:
+        spy = _benchmark(conn, fetch_prices)
+    except prices_mod.PriceUnavailable as e:  # no benchmark, no outcomes; say so instead of a traceback
+        log.warning("calibration: %s", e)
+        return {h: {"insufficient_history": True, "n": 0, "error": f"benchmark prices unavailable: {e}"} for h in horizons}
     results = {}
     for h in horizons:
         for c in candidates(conn, h, today):
