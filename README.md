@@ -40,7 +40,9 @@ Every round is cached per snapshot: a repeated `--full` run on the same day cost
 
 Measured on 2026-10-15 for AAPL `--full` (Gemini column failed on free-tier limits, so 10 agents + 2 judges): $3.23 and
 166 seconds. Per provider: Sonnet 5.5 personas + rebuttals $1.25 (10 calls, 525k input tokens), GPT-5.4 personas, rebuttals and
-judge rounds $1.34 (12 calls), Opus 5.5 judge rounds $0.64 (2 calls, 101k input). With Gemini Pro on a paid key expect roughly $5-6.
+judge rounds $1.34 (12 calls), Opus 5.5 judge rounds $0.64 (2 calls, 101k input). A second run with the Gemini Flash
+column serialized on the free tier: $4.84 and 20 minutes (3 of 5 Gemini cells and no Gemini judge survived the quota). With
+Gemini Pro on a paid key expect roughly $5-6 and about 5 minutes.
 
 Keys: Phase 1 commands need none. `analyze` needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (embeddings).
 A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_ID` (Console -> Settings -> Workspaces).
