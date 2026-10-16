@@ -39,6 +39,8 @@ def fixture_prepare(monkeypatch, db_conn):
                            columns=["accession", "form", "filed", "period_end", "primary_doc_url"])
     filings.attrs["name"] = "Apple Inc."
     monkeypatch.setattr(edgar_filings, "list_filings", lambda cik: filings)
+    from fundabot.ingest import fmp
+    monkeypatch.setattr(fmp, "fetch_transcript_dates", lambda t: [])  # no network; test_transcripts overrides
     monkeypatch.setattr(edgar_filings, "extract_items", lambda acc, cik, form, filed, company="": (
         {"item1a": (FIX / "sections/aapl_10k_item1a.txt").read_text(), "item7": (FIX / "sections/aapl_10k_item7.txt").read_text()}, True))
     return db_conn
