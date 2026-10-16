@@ -70,7 +70,7 @@ def test_run_stores_outcomes(db_conn):
 
     def fetch(ticker, years=5):
         fetched.append(ticker)
-        return prices(date(2026, 1, 1), [100 + 0.5 * i for i in range(40)])
+        return prices(date(2026, 1, 1), [100 + (1 if ticker == "AAPL" else 0.5) * i for i in range(40)])  # AAPL +30%, SPY +15% over 30 days
     stats = calibration.run(db_conn, horizons=(30,), fetch_prices=fetch, today=date(2026, 3, 1))
     assert fetched == ["SPY", "AAPL"] and stats[30]["insufficient_history"] is True and stats[30]["n"] == 1  # ticker closes refreshed too
     with db_conn.cursor() as cur:
