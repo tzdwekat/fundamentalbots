@@ -5,7 +5,7 @@ import pandas as pd
 
 from fundabot.ingest.edgar_client import get_json
 
-COLUMNS = ["accession", "form", "filed", "period_end", "primary_doc_url"]
+COLUMNS = ["accession", "form", "filed", "period_end", "primary_doc_url", "items"]
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 
 
@@ -17,16 +17,22 @@ def parse_submissions(payload: dict) -> pd.DataFrame:
     cik = int(payload["cik"])
     r = payload["filings"]["recent"]
     rows = []
-    for acc, form, filed, report, doc in zip(r["accessionNumber"], r["form"], r["filingDate"], r["reportDate"], r["primaryDocument"]):
+    items = r.get("items") or [""] * len(r["accessionNumber"])
+    for acc, form, filed, report, doc, it in zip(r["accessionNumber"], r["form"], r["filingDate"], r["reportDate"], r["primaryDocument"], items):
         url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}" if doc else None
-        rows.append((acc, form, date.fromisoformat(filed), date.fromisoformat(report) if report else None, url))
+        rows.append((acc, form, date.fromisoformat(filed), date.fromisoformat(report) if report else None, url, it or ""))
     df = pd.DataFrame(rows, columns=COLUMNS)
     df.attrs["name"] = payload.get("name", "")
     return df
 
 
-def list_filings(cik: int) -> pd.DataFrame:
-    return parse_submissions(get_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json"))
+def list_filings(cik: int, max_age_hours: float = 24) -> pd.DataFrame:
+    return parse_submissions(get_json(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", max_age_hours))
+
+
+def list_filings_fresh(cik: int) -> pd.DataFrame:
+    """Bypass the disk cache: the poller must see filings from the last few minutes."""
+    return list_filings(cik, max_age_hours=0)
 
 
 def select_for_snapshot(filings: pd.DataFrame) -> list[str]:

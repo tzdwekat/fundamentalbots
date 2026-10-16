@@ -41,7 +41,7 @@ FIX = Path(__file__).parent / "fixtures" / "sections"
 
 
 def filings_df(rows):
-    return pd.DataFrame(rows, columns=["accession", "form", "filed", "period_end", "primary_doc_url"])
+    return pd.DataFrame([(*r, "") for r in rows], columns=["accession", "form", "filed", "period_end", "primary_doc_url", "items"])
 
 
 def test_going_concern_regex():

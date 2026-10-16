@@ -219,13 +219,13 @@ def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-s
     adapters, judge_adapters = build_adapters(full, providers, model, judges)
     guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 4000)
 
-    async def runner(ticker: str, full_run: bool) -> dict:
+    async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
         conn = connect()
         try:
             if full_run:
-                html = await analyze_full(conn, ticker, PERSONAS_ALL, adapters, judge_adapters, OpenAIEmbedder(), out_dir=Path("reports"), guidance_adapter=guidance_adapter)
+                html = await analyze_full(conn, ticker, PERSONAS_ALL, adapters, judge_adapters, OpenAIEmbedder(), force=force, out_dir=Path("reports"), guidance_adapter=guidance_adapter)
             else:
-                html = await run(conn, ticker, PERSONAS_ALL, adapters, OpenAIEmbedder(), out_dir=Path("reports"), guidance_adapter=guidance_adapter)
+                html = await run(conn, ticker, PERSONAS_ALL, adapters, OpenAIEmbedder(), force=force, out_dir=Path("reports"), guidance_adapter=guidance_adapter)
             with conn.cursor() as cur:
                 cur.execute("SELECT verdict->>'composite_score', verdict->>'dispersion' FROM verdicts WHERE snapshot_id = (SELECT id FROM snapshots WHERE ticker = %s ORDER BY created_at DESC LIMIT 1) AND run_kind = 'full'", (ticker.upper(),))
                 row = cur.fetchone()
@@ -259,6 +259,40 @@ def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str
             typer.echo(f"{r['ticker']:<8} ok   composite {r.get('composite')}  dispersion {r.get('dispersion')}  {r.get('report')}")
         else:
             typer.echo(f"{r['ticker']:<8} {r['status']}  {r['error']}")
+
+
+@app.command()
+def poll(dry_run: bool = False):
+    """Diff watchlist tickers' EDGAR filings and transcript dates into the run queue (no model calls)."""
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import triggers
+
+    conn = connect()
+    if dry_run:
+        with conn.cursor() as cur:
+            cur.execute("SELECT ticker, period_key, reason, status, not_before FROM run_queue ORDER BY id")
+            for r in cur.fetchall():
+                typer.echo(f"queue: {r}")
+        typer.echo("dry run: not polling")
+        return
+    for q in triggers.poll(conn):
+        typer.echo(f"queued {q['ticker']} {q['period_key']} ({q['reason']})")
+
+
+@app.command()
+def worker(limit: int = 1, providers: str = "anthropic,openai,gemini"):
+    """Run queued full analyses whose wait has elapsed."""
+    import asyncio
+
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import triggers
+
+    runner = scan_runner(True, providers)
+
+    async def run_full(ticker):
+        return (await runner(ticker, True, force=True))["report"]  # a new filing or transcript means a new snapshot
+    for d in asyncio.run(triggers.worker(connect(), run_full, limit=limit)):
+        typer.echo(f"{d['ticker']} {d['period_key']}: {d['status']} {d['report'] or d['error']}")
 
 
 if __name__ == "__main__":

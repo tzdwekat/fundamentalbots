@@ -7,7 +7,7 @@ from fundabot.ingest import edgar_filings
 
 
 def filings_df(rows):
-    return pd.DataFrame(rows, columns=["accession", "form", "filed", "period_end", "primary_doc_url"])
+    return pd.DataFrame([(*r, "") for r in rows], columns=["accession", "form", "filed", "period_end", "primary_doc_url", "items"])
 
 
 def test_select_for_snapshot_counts():
@@ -32,7 +32,7 @@ def test_parse_submissions():
         "primaryDocument": ["aapl-20250927.htm", "xslF345X06/form4.xml"],
     }}}
     df = edgar_filings.parse_submissions(payload)
-    assert list(df.columns) == ["accession", "form", "filed", "period_end", "primary_doc_url"]
+    assert list(df.columns) == ["accession", "form", "filed", "period_end", "primary_doc_url", "items"]
     assert df.iloc[0].period_end == date(2025, 9, 27) and pd.isna(df.iloc[1].period_end)
     assert df.iloc[0].primary_doc_url == "https://www.sec.gov/Archives/edgar/data/320193/000032019325000073/aapl-20250927.htm"
 

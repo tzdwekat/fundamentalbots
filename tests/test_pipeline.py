@@ -35,8 +35,8 @@ def fixture_prepare(monkeypatch, db_conn):
     px = pd.DataFrame({"date": [date(2026, 10, 14)], "close": [340.0]})
     monkeypatch.setattr(prices, "fetch_daily_closes", lambda t, years=5: px)
     monkeypatch.setattr(prices, "fetch_splits", lambda t: pd.DataFrame({"date": [date(2020, 8, 31)], "ratio": [4.0]}))
-    filings = pd.DataFrame([("0000320193-25-000079", "10-K", date(2025, 10, 31), date(2025, 9, 27), "")],
-                           columns=["accession", "form", "filed", "period_end", "primary_doc_url"])
+    filings = pd.DataFrame([("0000320193-25-000079", "10-K", date(2025, 10, 31), date(2025, 9, 27), "", "")],
+                           columns=["accession", "form", "filed", "period_end", "primary_doc_url", "items"])
     filings.attrs["name"] = "Apple Inc."
     monkeypatch.setattr(edgar_filings, "list_filings", lambda cik: filings)
     from fundabot.ingest import fmp
