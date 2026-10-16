@@ -295,5 +295,28 @@ def worker(limit: int = 1, providers: str = "anthropic,openai,gemini"):
         typer.echo(f"{d['ticker']} {d['period_key']}: {d['status']} {d['report'] or d['error']}")
 
 
+@app.command()
+def schedule(action: str = typer.Argument(..., help="install | uninstall | status"), dry_run: bool = False):
+    """launchd jobs: poll and worker every 10 minutes, cheap watchlist scan every Sunday 06:00."""
+    from pathlib import Path
+
+    from fundabot.orchestrate import schedule as sched
+
+    if action == "install":
+        if dry_run:
+            for label, xml in sched.plists(Path(__import__("sys").argv[0]).resolve(), Path.cwd(), Path.home() / "Library" / "Logs" / "fundabot").items():
+                typer.echo(f"--- {label}\n{xml}")
+            return
+        for p in sched.install():
+            typer.echo(f"installed {p}")
+    elif action == "uninstall":
+        typer.echo("removed: " + ", ".join(sched.uninstall()))
+    elif action == "status":
+        jobs = sched.status()
+        typer.echo("\n".join(jobs) if jobs else "no fundabot jobs loaded")
+    else:
+        raise typer.BadParameter("action must be install, uninstall or status")
+
+
 if __name__ == "__main__":
     app()
