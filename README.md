@@ -79,8 +79,9 @@ pipeline is otherwise identical. `multi` is the three-provider layout above. `--
 whole debate on one provider: five persona cells, rebuttals on the same models, one screen judge and one escalation
 judge. Add a profile by adding a key to the file; every role is required. Embeddings stay on OpenAI. Measured on 2026-10-19:
 `analyze MSFT --full --profile openai` cost $0.78 and took 2 minutes 18 seconds (personas $0.36, rebuttals $0.25, screen
-judge $0.04, escalation judge $0.10, guidance $0.03; 30 of 46 claims escalated) against about $3.00 for the same run on
-`multi`. A single-provider verdict loses the cross-provider dispersion and judge-agreement signals, so the grid shows one
+judge $0.04, escalation judge $0.10, guidance $0.03; 30 of 46 claims escalated); `analyze GOOGL --full --profile anthropic`
+cost $0.92 (personas $0.46 with 177k cached tokens, rebuttals $0.27, judges $0.20) in about 4 minutes; the same runs on
+`multi` are about $3.00. A single-provider verdict loses the cross-provider dispersion and judge-agreement signals, so the grid shows one
 column and judge agreement is always 1.0.
 
 How the persona prompt got cheaper (Phase 5a): the metrics table is pruned to what the report shows (about 13k tokens instead
