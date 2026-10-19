@@ -35,17 +35,20 @@ class GeminiAdapter:
             raise RuntimeError("GEMINI_API_KEY is not set")
         self._client = genai.Client(api_key=settings.gemini_api_key, http_options=types.HttpOptions(timeout=180_000))
 
+    CACHED_RATE = 0.1  # implicit-cache reads $0.20/M for gemini-3.1-pro (third-party pricing pages, 2026-10-18)
+
     @staticmethod
-    def cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    def cost(model: str, input_tokens: int, output_tokens: int, cached: int = 0) -> float:
         pin, pout = PRICES.get(model, max(PRICES.values()))
-        return input_tokens / 1e6 * pin + output_tokens / 1e6 * pout
+        return (input_tokens - cached) / 1e6 * pin + cached / 1e6 * pin * GeminiAdapter.CACHED_RATE + output_tokens / 1e6 * pout
 
     def estimate_cost(self, input_chars: int) -> float:
         return self.cost(self.model, input_chars // 4, self.max_tokens // 2)
 
-    async def complete(self, system: str, user: str, schema: dict) -> CompletionResult:
+    async def complete(self, system: str, user: str, schema: dict, prefix: str | None = None) -> CompletionResult:
         t0 = time.monotonic()
-        config = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", response_json_schema=schema,
+        system_instruction = (prefix + "\n\n" + system) if prefix else system  # shared prefix first for Gemini's implicit caching
+        config = types.GenerateContentConfig(system_instruction=system_instruction, response_mime_type="application/json", response_json_schema=schema,
                                              max_output_tokens=self.max_tokens)
         async with _lock():
             for attempt in range(5):
@@ -64,5 +67,6 @@ class GeminiAdapter:
             raise RuntimeError(f"gemini returned no text: {reason}")
         um = r.usage_metadata
         out_tokens = (um.candidates_token_count or 0) + (getattr(um, "thoughts_token_count", 0) or 0)
+        cached = getattr(um, "cached_content_token_count", 0) or 0
         return CompletionResult(json.loads(r.text), um.prompt_token_count or 0, out_tokens, int((time.monotonic() - t0) * 1000),
-                                self.cost(self.model, um.prompt_token_count or 0, out_tokens), self.model)
+                                self.cost(self.model, um.prompt_token_count or 0, out_tokens, cached), self.model, cached)

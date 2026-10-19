@@ -21,18 +21,21 @@ class OpenAIAdapter:
         self.model, self.max_tokens = model, max_tokens
         self._client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=180.0, max_retries=3)
 
+    CACHED_RATE = 0.1  # cached input $0.25/M for gpt-5.4 (openai pricing, 2026-10-18)
+
     @staticmethod
-    def cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    def cost(model: str, input_tokens: int, output_tokens: int, cached: int = 0) -> float:
         pin, pout = PRICES.get(model, max(PRICES.values()))
-        return input_tokens / 1e6 * pin + output_tokens / 1e6 * pout
+        return (input_tokens - cached) / 1e6 * pin + cached / 1e6 * pin * OpenAIAdapter.CACHED_RATE + output_tokens / 1e6 * pout
 
     def estimate_cost(self, input_chars: int) -> float:
         return self.cost(self.model, input_chars // 4, self.max_tokens // 2)
 
-    async def complete(self, system: str, user: str, schema: dict) -> CompletionResult:
+    async def complete(self, system: str, user: str, schema: dict, prefix: str | None = None) -> CompletionResult:
         t0 = time.monotonic()
+        instructions = (prefix + "\n\n" + system) if prefix else system  # shared prefix first: OpenAI caches identical prompt prefixes automatically
         r = await self._client.responses.create(
-            model=self.model, instructions=system, input=user, max_output_tokens=self.max_tokens,
+            model=self.model, instructions=instructions, input=user, max_output_tokens=self.max_tokens,
             text={"format": {"type": "json_schema", "name": "analysis", "schema": schema, "strict": True}},
         )
         if r.status != "completed":
@@ -42,5 +45,6 @@ class OpenAIAdapter:
                 for c in getattr(item, "content", []) or []:
                     if getattr(c, "type", "") == "refusal":
                         raise RuntimeError(f"model refused: {getattr(c, 'refusal', '')[:200]}")
+        cached = getattr(getattr(r.usage, "input_tokens_details", None), "cached_tokens", 0) or 0
         return CompletionResult(json.loads(r.output_text), r.usage.input_tokens, r.usage.output_tokens, int((time.monotonic() - t0) * 1000),
-                                self.cost(self.model, r.usage.input_tokens, r.usage.output_tokens), r.model or self.model)
+                                self.cost(self.model, r.usage.input_tokens, r.usage.output_tokens, cached), r.model or self.model, cached)

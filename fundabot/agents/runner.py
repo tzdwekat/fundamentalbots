@@ -61,7 +61,7 @@ async def run_grid(conn: psycopg.Connection, sid: str, persona_names: list[str],
         if not names:
             return []
         calls = [(adapter, n, messages[n][1], messages[n][2], schemas.AGENT_OUTPUT_SCHEMA, messages[n][0]) for n in names]
-        return list(zip(names, await run_batch(conn, sid, calls)))
+        return list(zip(names, await run_batch(conn, sid, calls, warm_first=True)))  # first call populates the provider's prompt cache
 
     check_budget(conn, [(a, messages[n][0], messages[n][1], messages[n][2]) for a in adapters for n in todo[a]])  # whole grid, before any call
     per_provider = await asyncio.gather(*[one_provider(a) for a in adapters], return_exceptions=True)
