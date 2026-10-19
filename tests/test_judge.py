@@ -51,6 +51,54 @@ def test_judge_message_states_missing_consensus():
     assert "YOUR_ROUND_1" in rec and "openai" in rec and "theirs" in rec
 
 
+def jrow(provider, scores, mats=None):
+    """A stored round-1 judgement row."""
+    out = jout(scores)
+    for c in out["claims"]:
+        c["materiality"] = (mats or {}).get(c["claim_id"], 3)
+    return {"provider": provider, "model": "m", "round": 1, "output": out}
+
+
+def pclaim(i, **kw):
+    return {"id": i, "withdrawn": False, "refutations": [], "conceded_by": [], "agent": "bull/openai", "direction": "positive", "weight": 3, "text": f"text {i}", "evidence": ["metric:revenue@FY2024"], **kw}
+
+
+TPOOL = [pclaim(i) for i in ("a", "b", "c", "d", "e")]
+
+
+def test_escalate_rules():
+    screen = [jrow("anthropic", {"a": 4, "b": 2, "c": 4, "d": 4, "e": 4}, {"c": 4}),
+              jrow("openai", {"a": 4, "b": 4, "c": 4, "d": 4}),
+              jrow("gemini", {"a": 4, "b": 3, "c": 4, "d": 4})]
+    pool = [dict(c) for c in TPOOL]
+    pool[3]["refutations"] = [{"by": "bear/openai", "reason": "r", "evidence": []}]
+    # b: spread 2; c: one judge materiality 4; d: refuted; e: scored by one judge only; a: unanimous
+    assert judge.escalate(screen, pool, 3) == ["b", "c", "d", "e"]
+
+
+def test_escalate_single_judge_panel():
+    screen = [jrow("anthropic", {"a": 4, "b": 2}, {"b": 4})]
+    assert judge.escalate(screen, TPOOL[:2], 1) == ["b"]  # one judge: no "fewer than two" escalation; materiality still counts
+
+
+def test_escalate_skips_withdrawn():
+    screen = [jrow("anthropic", {"a": 4}), jrow("openai", {"a": 4})]
+    pool = [pclaim("a", withdrawn=True)]
+    assert judge.escalate(screen, pool, 2) == []
+
+
+def test_merge_panels_paths_and_fallback():
+    screen = {"a": {"evidence_strength": 4.0, "materiality": 3.0, "n_judges": 3, "spread": 0, "notes": []},
+              "b": {"evidence_strength": 3.0, "materiality": 4.0, "n_judges": 3, "spread": 2, "notes": []},
+              "c": {"evidence_strength": 2.0, "materiality": 4.0, "n_judges": 3, "spread": 0, "notes": []}}
+    strong = {"b": {"evidence_strength": 5.0, "materiality": 5.0, "n_judges": 3, "spread": 1, "notes": ["n"]},
+              "c": {"evidence_strength": 0.0, "materiality": 0.0, "n_judges": 0, "spread": 0, "notes": []}}
+    m = judge.merge_panels(screen, strong, ["b", "c"])
+    assert m["a"]["path"] == "screen" and m["a"]["evidence_strength"] == 4.0 and "fallback" not in m["a"]
+    assert m["b"]["path"] == "escalated" and m["b"]["evidence_strength"] == 5.0 and m["b"]["notes"] == ["n"]
+    assert m["c"]["path"] == "screen" and m["c"]["fallback"] is True and m["c"]["evidence_strength"] == 2.0  # no strong judge scored it
+
+
 def test_mean_scores_with_missing_judge():
     recon = [{"provider": "anthropic", "output": jout({"a": 3, "b": 5})}, {"provider": "openai", "output": jout({"a": 5})}, {"provider": "gemini", "output": jout({"a": 4, "b": 1})}]
     m = judge.mean_scores(recon, ["a", "b", "c"])

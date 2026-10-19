@@ -12,6 +12,8 @@ from fundabot.report.table import GROUPS
 
 log = logging.getLogger("fundabot")
 
+ESCALATE_SPREAD = 2  # screen judges' evidence_strength spread at or above this sends the claim to the strong panel
+ESCALATE_MATERIALITY = 4  # any screen judge rating a claim this material sends it to the strong panel
 SUB_SCORES = ["quality_score", "value_score", "earnings_momentum_score", "accounting_risk_score"]
 JUDGE_SCHEMA = {
     "type": "object",
@@ -171,4 +173,30 @@ def mean_scores(reconciled: list[dict], claim_ids: list[str]) -> dict[str, dict]
         s = [c["evidence_strength"] for c in rows]
         out[cid] = {"evidence_strength": sum(s) / len(s), "materiality": sum(c["materiality"] for c in rows) / len(rows),
                     "n_judges": len(rows), "spread": max(s) - min(s), "notes": [c["note"] for c in rows if c["note"]]}
+    return out
+
+
+def escalate(screen: list[dict], pool: list[dict], panel_size: int) -> list[str]:
+    """Claim ids the strong panel must judge with evidence: screen judges disagree (spread), any screen judge calls it
+    case-deciding (materiality), it was refuted, or too few screen judges scored it. Deterministic; no model involved."""
+    live = [c for c in pool if not c["withdrawn"]]
+    means = mean_scores(screen, [c["id"] for c in live])
+    material = {c["claim_id"] for j in screen for c in j["output"]["claims"] if c["materiality"] >= ESCALATE_MATERIALITY}
+    min_judges = min(2, panel_size)
+    return sorted(c["id"] for c in live
+                  if means[c["id"]]["spread"] >= ESCALATE_SPREAD or c["id"] in material or c["refutations"] or means[c["id"]]["n_judges"] < min_judges)
+
+
+def merge_panels(screen_means: dict, strong_means: dict, escalated: list[str]) -> dict:
+    """Per claim: the strong panel's entry when escalated and scored, else the screen panel's; each tagged with its path."""
+    out = {}
+    esc = set(escalated)
+    for cid, m in screen_means.items():
+        strong = strong_means.get(cid)
+        if cid in esc and strong and strong["n_judges"] > 0:
+            out[cid] = {**strong, "path": "escalated"}
+        elif cid in esc:
+            out[cid] = {**m, "path": "screen", "fallback": True}  # escalated but no strong judge scored it
+        else:
+            out[cid] = {**m, "path": "screen"}
     return out

@@ -42,7 +42,11 @@ def dispersion(revised: dict[str, tuple[int, float]], cells: list[tuple[str, str
 
 
 def implied_composite(pool: list[dict], judge_output: dict, revised: dict) -> float:
-    means = {c["claim_id"]: {"evidence_strength": float(c["evidence_strength"])} for c in judge_output["claims"]}
+    return implied_from_means(pool, {c["claim_id"]: {"evidence_strength": float(c["evidence_strength"])} for c in judge_output["claims"]}, revised)
+
+
+def implied_from_means(pool: list[dict], means: dict, revised: dict) -> float:
+    """The composite one judge implies: that judge's claim strengths (plus pass-through means for claims it did not judge)."""
     return composite(revised, agent_weights(pool, means))[0]
 
 

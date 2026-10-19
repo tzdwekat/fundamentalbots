@@ -67,6 +67,12 @@ def test_implied_composite_and_agreement():
     assert scoring.median_judge([1.0, 5.0, 3.0], ["anthropic", "openai", "gemini"]) == "gemini"
 
 
+def test_implied_from_means_matches_implied_composite():
+    jo = {"claims": [{"claim_id": k, "evidence_strength": 4, "materiality": 3, "note": ""} for k in MEANS]}
+    means_only = {c["claim_id"]: {"evidence_strength": float(c["evidence_strength"])} for c in jo["claims"]}
+    assert scoring.implied_from_means(POOL, means_only, REVISED) == scoring.implied_composite(POOL, jo, REVISED)
+
+
 def test_missing_judge_scores_use_available_judges():
     recon = [{"provider": "a", "output": {"claims": [{"claim_id": "bull/anthropic#0", "evidence_strength": 5, "materiality": 5, "note": ""}]}},
              {"provider": "b", "output": {"claims": [{"claim_id": "bull/anthropic#0", "evidence_strength": 3, "materiality": 3, "note": ""}]}},
