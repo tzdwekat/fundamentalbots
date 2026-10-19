@@ -2,6 +2,7 @@
 checked against the stats table, shown metrics or the cited news / excerpt text. Numbers are never the model's."""
 import hashlib
 import json
+import re
 from datetime import date
 
 import psycopg
@@ -20,6 +21,7 @@ NARRATIVE_SCHEMA = {
     },
     "required": ["sentences", "one_line"], "additionalProperties": False,
 }
+STATS_KEY = re.compile(r"\b(?:spy_ret|excess|ret)_\d+m\b")  # a model that echoes a stats key must not have "1m" read as one million
 PCT = ("ret_1m", "ret_3m", "ret_6m", "ret_12m", "drawdown_52w", "dist_52w_low", "ma50_slope_20d", "vol_20d", "spy_ret", "excess_ret")
 SYSTEM = """You explain what moved a stock's price over a window, for an investor who will check every word.
 Write at most six sentences. Each sentence names one driver (a filing, a news item, an earnings result, a market-wide
@@ -100,7 +102,7 @@ def ground_narrative(output: dict, inputs: dict) -> dict:
             dropped.append({**sent, "reason": f"unresolved: {', '.join(missing) or 'no evidence'}"})
             continue
         cited_values = [v for e in evidence for _, v in extract_numbers(texts.get(e, ""))]
-        unsupported = [t for t, v in extract_numbers(EVIDENCE_ID.sub(" ", sent["text"])) if not _supported(t, v, stats_values, cited_values)]
+        unsupported = [t for t, v in extract_numbers(STATS_KEY.sub(" ", EVIDENCE_ID.sub(" ", sent["text"]))) if not _supported(t, v, stats_values, cited_values)]
         if unsupported:
             dropped.append({**sent, "reason": f"unsupported: {', '.join(unsupported)}"})
             continue

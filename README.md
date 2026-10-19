@@ -95,6 +95,34 @@ rate and logged as cache-write tokens on the first call). On the AAPL run above 
 tokens from cache. `--tier screen` puts the personas on Haiku 5.5 / gpt-5.4-mini / Gemini Flash for a cheap first pass
 while the judges keep the strong models.
 
+## Web app
+
+`uv run fundabot web` serves http://127.0.0.1:8787 (no login; localhost only). Pages:
+
+- `/` overview: every watchlist ticker with close, 1/3/6-month returns, the outlook label, the latest composite and date,
+  the worker queue status, and Analyze cheap / full buttons that show the measured estimate for the selected profile.
+- `/t/AAPL` the stock picture: price chart for 30 / 90 / 180 days with the 50- and 200-day averages, markers for
+  filings (every EDGAR form, 8-Ks included), earnings, calls, splits, analyst upgrades/downgrades and the news near the
+  ten largest daily moves; the outlook block (momentum, valuation, trend and the rule that produced the label, all
+  computed in code); the decision panel from the latest verdict (composite, bull and bear columns with every claim's
+  evidence as a link that opens the metric cell, excerpt or article in a drawer, red flags, catalysts, judge summary,
+  link to the full report); next earnings date; ownership and estimate-revision lines; news and press releases for
+  7 / 30 / 90 days. "What moved it" is a six-sentence narrative written by the profile's cheap model from the stats,
+  moves, news and the window's filing excerpts, generated only when you press *Explain moves* (about $0.01 measured;
+  the button says so) and stored until the inputs change; every sentence cites ids you can open and every number is
+  checked against the inputs, failing sentences are dropped and counted.
+- `/review`, `/queue` (worker queue, web jobs, month-to-date spend against the budget, spend by day), `/calibration`.
+
+Analyze and Refresh buttons start background jobs in the server process (one per ticker, three at a time); a job is
+refused when the launchd worker already holds the ticker. Reports are served under `/reports/`. The page never runs
+`prepare()` or a model on its own; it refreshes prices, news, grades and the S&P series from stored tables at most
+every six hours.
+
+FMP endpoints in use: analyst estimates, earnings (surprises and the next date), price targets, transcripts, 13F
+summaries, insider statistics, stock news, press releases, analyst grades. Worth adding next, each with its own accuracy
+check: daily prices with volume from FMP instead of yfinance (touches the split-adjusted valuation history), sector and
+industry P/E snapshots for relative valuation, revenue segmentation, dividends.
+
 ## What the report contains
 
 Charts (inline SVG, no dependencies, light and dark mode): revenue and free cash flow, margins and ROIC, quarterly

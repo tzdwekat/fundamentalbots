@@ -79,3 +79,8 @@ async def test_ensure_narrative_caches_by_inputs_sha(db_conn):
     await moves.ensure_narrative(db_conn, a, 320193, 90, inputs(), force=True)
     assert a.calls == 2
     assert moves.load(db_conn, 1, 90) is None
+
+
+def test_stats_key_names_are_not_numbers():
+    out = {"sentences": [{"text": "The excess_1m return was -2.3% while ret_12m stayed positive.", "evidence": ["price:2026-09-12"]}], "one_line": "x"}
+    assert moves.ground_narrative(out, inputs())["dropped"][0]["reason"] == "unsupported: -2.3%"  # the key names vanish; the real number is still checked
