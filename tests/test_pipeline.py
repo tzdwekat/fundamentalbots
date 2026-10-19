@@ -16,7 +16,7 @@ PERSONAS = ["bull", "bear", "skeptic", "quality", "macro"]
 
 def fake_output(system, user):
     """Cites a real metric and a real chunk from the inputs; includes one hallucinated number."""
-    chunk_id = next(l.split()[1] for l in user.splitlines() if l.startswith("--- chunk:"))
+    chunk_id = next(l.split()[1] for l in (system + "\n" + user).splitlines() if l.startswith("--- chunk:"))
     return {"thesis": "Revenue of $999 billion is large.",
             "claims": [{"text": "Gross margin is high.", "evidence": ["metric:gross_margin@FY2024"], "direction": "positive", "weight": 4},
                        {"text": "Risk factors mention competition.", "evidence": [chunk_id], "direction": "negative", "weight": 2},

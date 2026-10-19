@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import inspect
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -37,13 +38,13 @@ def month_spend(conn: psycopg.Connection) -> float:
         return float(cur.fetchone()[0])
 
 
-Call = tuple[Adapter, str, str, str, dict]  # (adapter, persona, system, user, schema)
+Call = tuple  # (adapter, persona, system, user, schema[, prefix])
 
 
 def check_budget(conn: psycopg.Connection, planned: list[tuple]) -> None:
     """Fail closed before a round starts: `planned` holds (adapter, system, user) for every call the round will make."""
     spent = month_spend(conn)
-    estimate = sum(a.estimate_cost(len(s) + len(u)) for a, s, u in planned)
+    estimate = sum(a.estimate_cost(sum(len(x or "") for x in rest)) for a, *rest in planned)
     if planned and spent + estimate >= settings.fundabot_monthly_budget_usd:
         raise BudgetExceeded(f"month spend ${spent:.2f} + est ${estimate:.2f} exceeds budget ${settings.fundabot_monthly_budget_usd:.2f}")
 
@@ -51,19 +52,28 @@ def check_budget(conn: psycopg.Connection, planned: list[tuple]) -> None:
 async def run_batch(conn: psycopg.Connection, snapshot_id: str, calls: list[Call]) -> list[CompletionResult | Exception]:
     """Budget check for the whole batch (fail closed), concurrent calls, then one model_calls row per success.
     The DB connection is used only before and after the gather. Failures come back as exceptions in position."""
+    calls = [tuple(c) + (None,) * (6 - len(c)) for c in calls]  # (adapter, persona, system, user, schema, prefix)
     spent = month_spend(conn)
-    estimate = sum(a.estimate_cost(len(s) + len(u)) for a, _, s, u, _ in calls)
+    estimate = sum(a.estimate_cost(len(s) + len(u) + len(p or "")) for a, _, s, u, _, p in calls)
     if spent + estimate >= settings.fundabot_monthly_budget_usd:
         raise BudgetExceeded(f"month spend ${spent:.2f} + est ${estimate:.2f} exceeds budget ${settings.fundabot_monthly_budget_usd:.2f}")
-    results = await asyncio.gather(*[a.complete(s, u, schema) for a, _, s, u, schema in calls], return_exceptions=True)
+
+    def start(c):
+        a, _, s, u, schema, p = c
+        if p is None:
+            return a.complete(s, u, schema)
+        if "prefix" in inspect.signature(a.complete).parameters:
+            return a.complete(s, u, schema, prefix=p)
+        return a.complete(p + "\n\n" + s, u, schema)  # adapter without prefix support: same prompt, no caching
+    results = await asyncio.gather(*[start(c) for c in calls], return_exceptions=True)
     with conn.cursor() as cur:
-        for (adapter, persona, system, user, _), r in zip(calls, results):
+        for (adapter, persona, system, user, _, prefix), r in zip(calls, results):
             if isinstance(r, Exception):
                 continue
             cur.execute(
                 "INSERT INTO model_calls (snapshot_id, persona, provider, model, prompt_sha256, input_tokens, output_tokens, latency_ms, cost_usd) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (snapshot_id, persona, adapter.provider, r.model, hashlib.sha256((system + user).encode()).hexdigest(),
+                (snapshot_id, persona, adapter.provider, r.model, hashlib.sha256(((prefix or "") + system + user).encode()).hexdigest(),
                  r.input_tokens, r.output_tokens, r.latency_ms, r.cost_usd),
             )
     conn.commit()

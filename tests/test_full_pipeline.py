@@ -18,7 +18,7 @@ def persona_fake(provider):
             opp = re.findall(r"^(\S+/\S+#\d+) by", user, re.M)
             return {"responses": [{"claim_id": opp[0], "verdict": "concede", "reason": "fair", "evidence": []}] if opp else [],
                     "withdraws": [], "revised_score": 4 if persona in ("bull", "quality") else -2, "revised_confidence": 0.6}
-        chunk_id = next(l.split()[1] for l in user.splitlines() if l.startswith("--- chunk:"))
+        chunk_id = next(l.split()[1] for l in (system + "\n" + user).splitlines() if l.startswith("--- chunk:"))
         positive = persona in ("bull", "quality")
         d = "positive" if positive else "negative"
         return {"thesis": f"{persona} thesis", "claims": [

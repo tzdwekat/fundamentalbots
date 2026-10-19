@@ -22,6 +22,16 @@ positive|negative, weight 1-5 where 5 is thesis-defining), key_risks, what_would
 avoid to 10 strong own, integer), confidence (0-1). Make 4 to 10 claims. Each claim is one checkable statement."""
 
 
+def persona_tail(persona: dict) -> str:
+    """The persona-specific part of the system prompt (everything shared sits in the cacheable prefix)."""
+    return "\n\n".join([
+        f"You are the {persona['name']} analyst on a panel of five deliberately biased analysts reviewing one US-listed company.",
+        f"Role and bias: {persona['bias'].strip()}",
+        f"You read most closely: {', '.join(persona['reads_most'])}.",
+        OUTPUT_GUIDE,
+    ] + [f"Additional rule: {r}" for r in persona.get("extra_rules", [])])
+
+
 def system_prompt(persona: dict) -> str:
     return "\n\n".join([
         f"You are the {persona['name']} analyst on a panel of five deliberately biased analysts reviewing one US-listed company.",
@@ -61,7 +71,7 @@ def select_metrics(metrics: list[Metric], flags=()) -> list[Metric]:
             out.append(m)
         elif m.period == "current" and (m.metric_id.endswith("_ttm") or "_5y_" in m.metric_id or m.metric_id.startswith("dcf") or m.metric_id == "reverse_dcf_implied_growth"):
             out.append(m)
-        elif m.period in fys and (m.metric_id.endswith(("_cagr_3y", "_cagr_5y", "_yoy")) or m.metric_id in ("ebitda", "fcf", "total_debt", "net_debt", "gross_profit", "total_debt_reported")):
+        elif m.period in fys or m.period == "current":  # other derived ids: fiscal years and current only, never quarters
             out.append(m)
     return sorted(out, key=lambda m: (m.metric_id, m.period))
 
@@ -90,3 +100,34 @@ def build_user_message(ticker: str, snapshot: dict, metrics: list[Metric], flags
     for c in chunks:
         lines += [f"--- chunk:{c.id} ({c.item}, {c.accession})", c.text]
     return "\n".join(lines)
+
+
+def shared_prefix(ticker: str, snapshot: dict, metrics: list[Metric], flags: list[RedFlag], shared_chunks: list[Chunk]) -> str:
+    """Byte-identical across the personas of one snapshot: the inputs every agent sees, then the hard rules."""
+    lines = [f"SNAPSHOT\nticker: {ticker}\nsnapshot_id: {snapshot['id']}\nprice_date: {snapshot.get('price_date')}\n"
+             f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}", ""]
+    lines.append("METRICS (one per line: id@period = value unit [flags] <- formula; cite by id)")
+    lines += [metric_line(m) for m in select_metrics(metrics, flags)]
+    lines += ["", "RED_FLAGS (rules engine)"]
+    lines += [f"{f.flag_id} [{f.severity}]: {f.detail} evidence={json.dumps(f.evidence)}" for f in flags] or ["none"]
+    lines += ["", "SHARED_EXCERPTS (cite as chunk:<id>)"]
+    for c in sorted(shared_chunks, key=lambda c: c.id):
+        lines += [f"--- chunk:{c.id} ({c.item}, {c.accession})", c.text]
+    lines += ["", HARD_RULES]
+    return "\n".join(lines)
+
+
+def build_messages(ticker: str, snapshot: dict, metrics: list[Metric], flags: list[RedFlag], shared_chunks: list[Chunk], persona_chunks: list[Chunk],
+                   persona: dict, notes: list[str]) -> tuple[str, str, str]:
+    """(prefix, system_tail, user): the prefix is shared and cacheable, the tail is the persona, the user part is persona-specific input."""
+    lines = []
+    if notes:
+        lines += ["NOTES"] + list(notes) + [""]
+    lines.append("PERSONA_EXCERPTS (retrieved for your role; cite as chunk:<id>)")
+    if persona_chunks:
+        for c in persona_chunks:
+            lines += [f"--- chunk:{c.id} ({c.item}, {c.accession})", c.text]
+    else:
+        lines.append("(no additional excerpts beyond the shared set)")
+    lines += ["", "Write your analysis as JSON following the schema."]
+    return shared_prefix(ticker, snapshot, metrics, flags, shared_chunks), persona_tail(persona), "\n".join(lines)
