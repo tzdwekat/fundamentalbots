@@ -1,4 +1,4 @@
-"""Three judges (one per provider) score the surviving claims, then reconcile once after reading each other."""
+"""Judges: a cheap screen panel scores every surviving claim (round 1); the strong panel re-judges the escalated ones with evidence (round 2)."""
 import json
 import logging
 
@@ -113,11 +113,22 @@ def build_message(pool, flags, metrics, earnings_available: bool, evidence: dict
     return "\n".join(lines)
 
 
-def build_reconcile_message(own: dict, others: list[tuple[str, dict]]) -> str:
-    lines = ["YOUR_ROUND_1", json.dumps(own, indent=1)]
-    for provider, out in others:
-        lines += ["", f"OTHER_JUDGE ({provider})", json.dumps(out, indent=1)]
-    lines += ["", "Revise where persuaded; where you keep a different score, say why in note. Return the full schema again."]
+def build_escalation_message(escalated_pool, screen: list[dict], unanimous: list[tuple[dict, dict]], flags, metrics, earnings_available: bool,
+                             evidence: dict[str, str], revised: dict) -> str:
+    """Round 2: the escalated claims with their evidence (as round 1), plus what the screen panel said about them and the
+    unanimous claims it already settled (for the sub-scores and summary; not to be scored again)."""
+    base = build_message(escalated_pool, flags, metrics, earnings_available, evidence, revised)
+    head, _, tail = base.partition("\nEVIDENCE\n")
+    lines = [head, "", "SCREEN_PANEL_SCORES (a cheaper panel's first pass on the claims above; you decide)"]
+    for c in escalated_pool:
+        for j in screen:
+            for sc in j["output"]["claims"]:
+                if sc["claim_id"] == c["id"]:
+                    lines.append(f"{c['id']}: {j['provider']} strength {sc['evidence_strength']} materiality {sc['materiality']}" + (f' note "{sc["note"]}"' if sc["note"] else ""))
+    lines += ["", "UNANIMOUS_CLAIMS (scored by the screen panel; do not score these, but weigh them in the sub-scores and summary)"]
+    lines += [f"{c['id']} by {c['agent']} ({c['direction']}, weight {c['weight']}): {c['text']} -> strength {m['evidence_strength']:.1f} materiality {m['materiality']:.1f}"
+              for c, m in unanimous] or ["none"]
+    lines += ["", "EVIDENCE", tail]
     return "\n".join(lines)
 
 
@@ -127,8 +138,11 @@ def load_judgements(conn: psycopg.Connection, sid: str, round_: int) -> list[dic
         return [dict(zip(["provider", "model", "round", "output"], r)) for r in cur.fetchall()]
 
 
-async def _run_round(conn, sid, judges, messages: dict[str, str], round_: int) -> list[dict]:
-    cached = {(j["provider"], j["model"]) for j in load_judgements(conn, sid, round_)}
+async def _run_round(conn, sid, judges, messages: dict[str, str], round_: int, escalated: list[str] | None = None) -> list[dict]:
+    """escalated (round 2): the output is stored with that id list and reused only for the same list; scores for other ids are dropped."""
+    def usable(row):
+        return escalated is None or row["output"].get("_escalated") == escalated
+    cached = {(j["provider"], j["model"]) for j in load_judgements(conn, sid, round_) if usable(j)}
     todo = [j for j in judges if (j.provider, j.model) not in cached]
     if todo:
         results = await run_batch(conn, sid, [(j, f"judge:r{round_}", system_prompt(), messages[j.provider], JUDGE_SCHEMA) for j in todo])
@@ -141,6 +155,11 @@ async def _run_round(conn, sid, judges, messages: dict[str, str], round_: int) -
             except SchemaError as e:
                 log.warning("judge %s round %s schema: %s", j.provider, round_, e)
                 continue
+            if escalated is not None:
+                extra = [c["claim_id"] for c in output["claims"] if c["claim_id"] not in escalated]
+                if extra:
+                    log.warning("judge %s scored %d claims outside the escalated set; dropped: %s", j.provider, len(extra), extra[:5])
+                output = {**output, "claims": [c for c in output["claims"] if c["claim_id"] in escalated], "_escalated": list(escalated)}
             with conn.cursor() as cur:
                 cur.execute("INSERT INTO judgements (snapshot_id, provider, model, round, output) VALUES (%s,%s,%s,%s,%s) "
                             "ON CONFLICT (snapshot_id, provider, model, round) DO UPDATE SET output = EXCLUDED.output",
@@ -148,18 +167,15 @@ async def _run_round(conn, sid, judges, messages: dict[str, str], round_: int) -
             conn.commit()
     wanted = {(j.provider, j.model) for j in judges}
     order = {j.provider: i for i, j in enumerate(judges)}
-    return sorted([j for j in load_judgements(conn, sid, round_) if (j["provider"], j["model"]) in wanted], key=lambda j: order[j["provider"]])
+    return sorted([j for j in load_judgements(conn, sid, round_) if (j["provider"], j["model"]) in wanted and usable(j)], key=lambda j: order[j["provider"]])
 
 
 async def run_judges(conn, sid, judges, message: str) -> list[dict]:
     return await _run_round(conn, sid, judges, {j.provider: message for j in judges}, 1)
 
 
-async def run_reconcile(conn, sid, judges, round1: list[dict]) -> list[dict]:
-    by_provider = {j["provider"]: j["output"] for j in round1}
-    messages = {j.provider: build_reconcile_message(by_provider[j.provider], [(p, o) for p, o in by_provider.items() if p != j.provider])
-                for j in judges if j.provider in by_provider}
-    return await _run_round(conn, sid, [j for j in judges if j.provider in messages], messages, 2)
+async def run_escalation(conn, sid, judges, messages: dict[str, str], escalated: list[str]) -> list[dict]:
+    return await _run_round(conn, sid, [j for j in judges if j.provider in messages], messages, 2, list(escalated))
 
 
 def mean_scores(reconciled: list[dict], claim_ids: list[str]) -> dict[str, dict]:

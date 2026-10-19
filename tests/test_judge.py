@@ -47,8 +47,6 @@ def test_judge_message_states_missing_consensus():
     msg2 = judge.build_message(pool, flags, ms + [Metric("eps_surprise", "Q3FY2026", 0.05, "ratio", "x", {}, ["vendor_fmp"])], True, {}, {})
     assert "CONSENSUS_DATA" in msg2 and "eps_surprise" in msg2 and "unavailable" not in msg2
     assert "do not form a thesis" in judge.system_prompt().lower() or "do not form" in judge.system_prompt().lower()
-    rec = judge.build_reconcile_message(jout({"a": 3}, "mine"), [("openai", jout({"a": 5}, "theirs"))])
-    assert "YOUR_ROUND_1" in rec and "openai" in rec and "theirs" in rec
 
 
 def jrow(provider, scores, mats=None):
@@ -107,20 +105,66 @@ def test_mean_scores_with_missing_judge():
     assert m["c"] == {"evidence_strength": 0.0, "materiality": 0.0, "n_judges": 0, "spread": 0, "notes": []}
 
 
-@pytest.mark.db
-async def test_run_judges_and_reconcile_cache(db_conn):
-    from fundabot.orchestrate import snapshot
+def strong(outputs, provider="anthropic"):
+    a = FakeAdapter(outputs)
+    a.provider, a.model = provider, "strong"
+    return a
 
-    sid = snapshot.create_snapshot(db_conn, "AAPL", 320193, 1, ["acc"], date(2026, 10, 14), 300.0, 1e10)
+
+def sid_for(db_conn):
+    from fundabot.orchestrate import snapshot
+    return snapshot.create_snapshot(db_conn, "AAPL", 320193, 1, ["acc"], date(2026, 10, 14), 300.0, 1e10)
+
+
+@pytest.mark.db
+async def test_run_judges_round1_cached(db_conn):
+    sid = sid_for(db_conn)
     judges = []
     for pr in ("anthropic", "openai", "gemini"):
         a = FakeAdapter([jout({"bull/openai#0": 4}, summary=pr)])
-        a.provider, a.model = pr, "judge-m"
+        a.provider, a.model = pr, "screen-m"
         judges.append(a)
     r1 = await judge.run_judges(db_conn, sid, judges, "JUDGE MESSAGE")
     assert [j["provider"] for j in r1] == ["anthropic", "openai", "gemini"] and all(j["round"] == 1 for j in r1) and sum(a.calls for a in judges) == 3
-    r2 = await judge.run_reconcile(db_conn, sid, judges, r1)
-    assert all(j["round"] == 2 for j in r2) and sum(a.calls for a in judges) == 6 and r2[0]["output"]["one_paragraph_summary"] == "anthropic"
     await judge.run_judges(db_conn, sid, judges, "JUDGE MESSAGE")
-    await judge.run_reconcile(db_conn, sid, judges, r1)
-    assert sum(a.calls for a in judges) == 6
+    assert sum(a.calls for a in judges) == 3
+
+
+@pytest.mark.db
+async def test_escalation_round_drops_unescalated_scores(db_conn):
+    sid = sid_for(db_conn)
+    a = strong([jout({"a": 5, "z": 1})])
+    r2 = await judge.run_escalation(db_conn, sid, [a], {"anthropic": "MSG"}, ["a"])
+    assert [c["claim_id"] for c in r2[0]["output"]["claims"]] == ["a"] and r2[0]["output"]["_escalated"] == ["a"] and r2[0]["round"] == 2
+
+
+@pytest.mark.db
+async def test_round2_cache_keyed_on_escalated_set(db_conn):
+    sid = sid_for(db_conn)
+    a = strong([jout({"a": 5}), jout({"a": 4, "b": 4})])
+    await judge.run_escalation(db_conn, sid, [a], {"anthropic": "MSG"}, ["a"])
+    await judge.run_escalation(db_conn, sid, [a], {"anthropic": "MSG"}, ["a"])
+    assert a.calls == 1  # same set: cached
+    r = await judge.run_escalation(db_conn, sid, [a], {"anthropic": "MSG"}, ["a", "b"])
+    assert a.calls == 2 and r[0]["output"]["_escalated"] == ["a", "b"] and len(r) == 1
+
+
+@pytest.mark.db
+async def test_old_reconcile_row_is_not_reused_as_strong_panel(db_conn):
+    from psycopg.types.json import Jsonb
+
+    sid = sid_for(db_conn)
+    with db_conn.cursor() as cur:  # a round-2 row written by the old reconcile pipeline: no _escalated marker
+        cur.execute("INSERT INTO judgements (snapshot_id, provider, model, round, output) VALUES (%s, 'anthropic', 'strong', 2, %s)", (sid, Jsonb(jout({"a": 1}))))
+    a = strong([jout({"a": 5})])
+    r = await judge.run_escalation(db_conn, sid, [a], {"anthropic": "MSG"}, ["a"])
+    assert a.calls == 1 and r[0]["output"]["claims"][0]["evidence_strength"] == 5
+
+
+def test_escalation_message_blocks():
+    msg = judge.build_escalation_message([TPOOL[1]], [jrow("anthropic", {"b": 2}), jrow("openai", {"b": 4})],
+                                         [(TPOOL[0], {"evidence_strength": 4.0, "materiality": 3.0})], [], [], False,
+                                         {"metric:revenue@FY2024": "revenue = 1"}, {"bull/openai": (2, 0.6)})
+    assert "SCREEN_PANEL_SCORES" in msg and "anthropic strength 2 materiality 3" in msg and "UNANIMOUS_CLAIMS" in msg and "a by bull/openai" in msg
+    assert msg.index("SCREEN_PANEL_SCORES") < msg.index("UNANIMOUS_CLAIMS") < msg.index("EVIDENCE")
+    assert "b by bull/openai" in msg.split("SCREEN_PANEL_SCORES")[0] and "a by bull/openai" not in msg.split("SCREEN_PANEL_SCORES")[0]
