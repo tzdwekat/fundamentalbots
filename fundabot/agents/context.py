@@ -49,12 +49,15 @@ def select_periods(metrics: list[Metric]) -> set[str]:
 
 def select_metrics(metrics: list[Metric], flags=()) -> list[Metric]:
     """The metrics an agent is shown (and what counts as "shown" for grounding): report-group ids at the report's
-    columns (5 FY, 4 Q, current), raw XBRL items at fiscal years only, TTM / 5-year-range / DCF ids at current,
-    CAGRs at fiscal years, plus any red-flag evidence id."""
+    columns (5 FY, 4 Q, current), raw XBRL items and other derived ids at fiscal years plus the newest quarter (the
+    latest OCF, SBC, debt and equity between annual reports), TTM / 5-year-range / DCF ids at current, plus any
+    red-flag evidence id."""
     from fundabot.report.table import GROUPS, columns_for
 
     cols = set(columns_for(metrics))
     fys = {c for c in cols if c.startswith("FY")}
+    qs = [c for c in cols if c.startswith("Q")]
+    newest_q = max(qs, key=lambda p: (int(p[4:]), int(p[1]))) if qs else None
     group_ids = {m for g in GROUPS.values() for m in g}
     flagged = {e.split(":", 1)[1] for f in flags for e in f.evidence if e.startswith("metric:")}
     out = []
@@ -67,11 +70,11 @@ def select_metrics(metrics: list[Metric], flags=()) -> list[Metric]:
             continue
         if m.metric_id in group_ids:
             out.append(m)
-        elif m.formula_id.startswith("xbrl:") and m.period in fys:
+        elif m.formula_id.startswith("xbrl:") and (m.period in fys or m.period == newest_q):
             out.append(m)
         elif m.period == "current" and (m.metric_id.endswith("_ttm") or "_5y_" in m.metric_id or m.metric_id.startswith("dcf") or m.metric_id == "reverse_dcf_implied_growth"):
             out.append(m)
-        elif m.period in fys or m.period == "current":  # other derived ids: fiscal years and current only, never quarters
+        elif m.period in fys or m.period == "current" or m.period == newest_q:  # other derived ids: no older quarters
             out.append(m)
     return sorted(out, key=lambda m: (m.metric_id, m.period))
 

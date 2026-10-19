@@ -31,7 +31,7 @@ def ids(ms):
 
 def test_select_metrics_allowlist(aapl_metrics):
     shown = ids(context.select_metrics(aapl_metrics))
-    assert "ocf@Q3FY2026" not in shown and "ocf@FY2025" in shown  # raw XBRL items at fiscal years only
+    assert "ocf@Q3FY2026" in shown and "ocf@Q2FY2026" not in shown and "ocf@FY2025" in shown  # raw XBRL items: fiscal years + newest quarter
     assert "gross_margin@FY2025" in shown and "revenue_yoy@Q3FY2026" in shown and "revenue_yoy@Q1FY2025" not in shown  # 4-quarter window
     assert {"fcf_ttm@current", "pe_5y_max@current", "dcf_base@current", "revenue_cagr_3y@FY2025"} <= shown
     group_ids = {m for g in GROUPS.values() for m in g}
@@ -48,15 +48,25 @@ def test_red_flag_evidence_always_shown():
 
 
 def test_cited_ids_fixture_resolves(aapl_metrics):
-    """Every metric id the stored AAPL/NVDA agents cited must stay citable: shown when the snapshot has it."""
+    """Every metric:id@period the stored AAPL/NVDA agents cited must stay shown when the snapshot has that exact cell."""
     fixture = json.loads((FIX / "cited_metric_ids.json").read_text())
-    from fundabot.report.table import columns_for
+    shown = ids(context.select_metrics(aapl_metrics))
+    have = ids(aapl_metrics)
+    hidden = sorted(e[len("metric:"):] for e in fixture["evidence_ids"] if e.startswith("metric:") and e[len("metric:"):] in have and e[len("metric:"):] not in shown)
+    qs = sorted({m.period for m in aapl_metrics if m.period.startswith("Q")}, key=lambda p: (int(p[4:]), int(p[1])))
+    older_quarters = set(qs[:-1])  # the only cells pruning may hide: quarters before the newest one (the spec's 4-quarter window for groups, newest only for the rest)
+    assert all(h.split("@")[1] in older_quarters for h in hidden), [h for h in hidden if h.split("@")[1] not in older_quarters]
 
-    cols = set(columns_for(aapl_metrics))
-    shown_ids = {m.metric_id for m in context.select_metrics(aapl_metrics)}
-    have_at_columns = {m.metric_id for m in aapl_metrics if m.period in cols}
-    missing = sorted(m for m in fixture["metric_ids"] if m in have_at_columns and m not in shown_ids)
-    assert missing == [], missing
+
+def test_raw_and_derived_ids_shown_at_newest_quarter():
+    """Between annual reports an agent reasons from the latest quarter's OCF, SBC, debt and equity, so raw XBRL and
+    other derived ids are shown at the newest quarter column as well as at fiscal years."""
+    ms = [Metric("revenue", f"FY{y}", 1.0, "USD", "x") for y in range(2021, 2026)]
+    ms += [Metric("ocf", f"Q{q}FY2026", 1.0, "USD", "xbrl:ocf") for q in (1, 2, 3)]
+    ms += [Metric("ebitda", f"Q{q}FY2026", 1.0, "USD", "ebitda") for q in (1, 2, 3)]
+    shown = ids(context.select_metrics(ms))
+    assert "ocf@Q3FY2026" in shown and "ebitda@Q3FY2026" in shown
+    assert "ocf@Q1FY2026" not in shown and "ebitda@Q1FY2026" not in shown
 
 
 def test_dedupe_boilerplate_keeps_newest():

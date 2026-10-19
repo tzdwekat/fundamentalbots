@@ -86,7 +86,7 @@ async def run_grid(conn: psycopg.Connection, sid: str, persona_names: list[str],
                                 (sid, name, adapter.provider, adapter.model, Jsonb(r.output), f"schema: {e}"[:500]))
                     continue
                 ids = messages[name][3]
-                grounded = ground(output, metrics, [chunks_by_id[c] for c in ids if c in chunks_by_id], s["accessions"])
+                grounded = ground(output, metrics, [chunks_by_id[c] for c in ids if c in chunks_by_id], s["accessions"], flags)
                 cur.execute("INSERT INTO analyses (snapshot_id, persona, provider, model, output, grounded, chunk_ids, status, error) VALUES (%s,%s,%s,%s,%s,%s,%s,'ok',NULL) "
                             "ON CONFLICT (snapshot_id, persona, provider, model) DO UPDATE SET output = EXCLUDED.output, grounded = EXCLUDED.grounded, "
                             "chunk_ids = EXCLUDED.chunk_ids, status = 'ok', error = NULL",

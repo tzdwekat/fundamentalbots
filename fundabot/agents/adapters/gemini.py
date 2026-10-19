@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 
@@ -21,6 +22,7 @@ RETRY_IN = re.compile(r"retry in ([\d.]+)s", re.I)
 CONCURRENCY = 4  # per event loop; a free-tier key still 429s above ~2 and is handled by the retry delay below
 MIN_CACHE_CHARS = 4096 * 4  # explicit caches need ~4k tokens on Pro; storage for a 25k-token prefix over a grid is well under $0.01
 CACHE_TTL = "900s"
+log = logging.getLogger("fundabot")
 _locks: dict = {}  # one Semaphore per event loop (the CLI runs one loop per ticker)
 _cache_locks: dict = {}
 
@@ -69,9 +71,13 @@ class GeminiAdapter:
             return c.name, (getattr(c.usage_metadata, "total_token_count", 0) or 0)
 
     async def complete(self, system: str, user: str, schema: dict, prefix: str | None = None) -> CompletionResult:
-        t0, written = time.monotonic(), 0
+        t0, written, name = time.monotonic(), 0, None
         if prefix and len(prefix) >= MIN_CACHE_CHARS:
-            name, written = await self._cache_for(prefix)
+            try:
+                name, written = await self._cache_for(prefix)
+            except Exception as e:  # a cache failure costs the discount, never the column
+                log.warning("gemini cache create failed (%s); sending the prefix uncached", str(e)[:200])
+        if name:
             config = types.GenerateContentConfig(cached_content=name, response_mime_type="application/json",
                                                  response_json_schema=schema, max_output_tokens=self.max_tokens)
             contents = system + "\n\n" + user  # the persona tail rides with the user turn; cached_content excludes system_instruction

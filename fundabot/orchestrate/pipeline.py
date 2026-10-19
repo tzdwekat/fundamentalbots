@@ -239,7 +239,7 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     raw_catalysts = [{**c, "evidence": [e for e in c["evidence"] if resolvable(e)]} for j in reconciled for c in j["output"]["catalysts"]]
     catalysts = claims.dedupe([c for c in raw_catalysts if c["evidence"]], embedder, key="what")  # a catalyst with no real evidence is dropped
     verdict = scoring.build_verdict(ticker.upper(), sid, judged, revised, means, reconciled, implied, cells, catalysts, [f.to_dict() for f in flags])
-    verdict["summary_unsupported"] = {j["provider"]: grounding.unsupported_numbers(j["output"]["one_paragraph_summary"], metrics, list(chunks_by_id.values()))
+    verdict["summary_unsupported"] = {j["provider"]: grounding.unsupported_numbers(j["output"]["one_paragraph_summary"], metrics, list(chunks_by_id.values()), flags)
                                       for j in reconciled}
     verdict["providers"] = [a.provider for a in adapters]
     verdict["judges"] = [{"provider": j["provider"], "model": j["model"]} for j in reconciled]

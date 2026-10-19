@@ -47,7 +47,7 @@ def _supported(text: str, value: float, values: list[float], chunk_values: list[
     return any(_close(value, cv * mult, tol) for cv in chunk_values for mult in (1.0, 1e3, 1e6))
 
 
-def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions: list[str] = ()) -> dict:
+def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions: list[str] = (), flags=()) -> dict:
     from fundabot.agents.context import select_metrics
 
     g = deepcopy(output)
@@ -55,7 +55,7 @@ def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions:
     any_period = {f"metric:{m.metric_id}" for m in metrics}
     chunk_ids = {f"chunk:{c.id}" for c in chunks}
     filing_ids = {f"filing:{a}" for a in accessions}
-    values = [m.value for m in select_metrics(metrics) if m.value is not None]  # only what the agent was shown counts as support
+    values = [m.value for m in select_metrics(metrics, flags) if m.value is not None]  # only what the agent was shown counts as support
     chunk_values = [v for c in chunks for _, v in extract_numbers(c.text)]
 
     def resolve(eid: str) -> bool:
@@ -83,10 +83,10 @@ def ground(output: dict, metrics: list[Metric], chunks: list[Chunk], accessions:
     return g
 
 
-def unsupported_numbers(text: str, metrics: list[Metric], chunks: list[Chunk]) -> list[str]:
+def unsupported_numbers(text: str, metrics: list[Metric], chunks: list[Chunk], flags=()) -> list[str]:
     """Numbers in free text (e.g. a judge summary) that match neither a shown metric nor a retrieved chunk."""
     from fundabot.agents.context import select_metrics
 
-    values = [m.value for m in select_metrics(metrics) if m.value is not None]
+    values = [m.value for m in select_metrics(metrics, flags) if m.value is not None]
     chunk_values = [v for c in chunks for _, v in extract_numbers(c.text)]
     return [t for t, v in extract_numbers(text) if not _supported(t, v, values, chunk_values)]

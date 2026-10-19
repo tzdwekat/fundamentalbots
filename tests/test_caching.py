@@ -166,3 +166,22 @@ async def test_grid_warms_cache_first(db_conn):
     a = Ordered([GOOD])
     await run_grid(db_conn, sid, ["bull", "bear", "skeptic"], [a], FakeEmbedder())
     assert a.events[:2] == [("start", 0), ("end", 0)] and a.calls == 3
+
+
+async def test_gemini_cache_create_failure_falls_back_to_uncached(monkeypatch):
+    """A failed caches.create must not take down the Gemini column: the call goes out uncached, prefix in the system instruction."""
+    a = GeminiAdapter("gemini-3.1-pro-preview")
+    captured = {}
+
+    async def fake_create(**kw):
+        raise RuntimeError("503 unavailable")
+
+    async def fake_generate(**kw):
+        captured.update(kw)
+        return NS(text=json.dumps(GOOD), usage_metadata=NS(prompt_token_count=40_000, candidates_token_count=1_000, thoughts_token_count=0, cached_content_token_count=None),
+                  candidates=[NS(finish_reason="STOP")])
+    monkeypatch.setattr(a._client.aio.caches, "create", fake_create)
+    monkeypatch.setattr(a._client.aio.models, "generate_content", fake_generate)
+    r = await a.complete("TAIL", "user", schemas.AGENT_OUTPUT_SCHEMA, prefix=LONG_PREFIX)
+    assert r.output == GOOD and r.cached_input_tokens == 0 and r.cache_write_tokens == 0
+    assert captured["config"].cached_content is None and captured["config"].system_instruction == LONG_PREFIX + "\n\nTAIL" and captured["contents"] == "user"

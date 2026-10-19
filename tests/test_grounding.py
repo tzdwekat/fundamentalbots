@@ -112,3 +112,14 @@ def test_inline_evidence_ids_are_not_numbers():
     # a model may write ids in prose; the CIK/accession digits inside them are not figures to verify
     text = "Supply risk is structural. Evidence: chunk:0000320193-25-000079#item8-18, metric:pe_5y_max@current; margin was 46.2%."
     assert [v for _, v in extract_numbers(text)] == [0.462]
+
+
+def test_flagged_metric_value_counts_as_support():
+    """A red-flag evidence metric is shown to the agent even outside the allowlist, so its value must count as support."""
+    from fundabot.analytics.red_flags import RedFlag
+
+    ms = METRICS + [Metric("revenue", f"FY{y}", 1.0, "USD", "x") for y in range(2020, 2024)] + [Metric("accruals_ratio", "FY2019", 0.2, "ratio", "x")]  # FY2019: outside the 5-FY window
+    flags = [RedFlag("accruals_high", "high", ["metric:accruals_ratio@FY2019"], "d")]
+    g = ground(out([claim("accruals were 20% in FY2019", ["metric:accruals_ratio@FY2019"])]), ms, CHUNKS, flags=flags)
+    assert g["claims"][0]["unsupported_numbers"] == []
+    assert ground(out([claim("accruals were 20% in FY2019", ["metric:accruals_ratio@FY2019"])]), ms, CHUNKS)["claims"][0]["unsupported_numbers"] == ["20%"]
