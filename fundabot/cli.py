@@ -133,13 +133,53 @@ def grid(ticker: str):
     typer.echo(grid_table(conn, snap["id"]))
 
 
+def cost_table(conn, sid: str) -> str:
+    """Per-round token and USD totals for one snapshot. Rounds: persona, rebuttal, judge:rN; guidance and embedding
+    calls are logged without a snapshot id (keyed by transcript / filing) and so are not in this table."""
+    from fundabot.agents.runner import PERSONA_ORDER
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT persona, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, cost_usd FROM model_calls WHERE snapshot_id = %s", (sid,))
+        rows = cur.fetchall()
+    rounds: dict[str, list] = {}
+    for persona, *nums in rows:
+        key = "persona" if persona in PERSONA_ORDER else persona.split(":")[0] if not persona.startswith("judge") else persona
+        rounds.setdefault(key, [0, 0, 0, 0, 0, 0.0])
+        rounds[key][0] += 1
+        for i, n in enumerate(nums, 1):
+            rounds[key][i] += float(n) if i == 5 else int(n)
+    total = [sum(r[i] for r in rounds.values()) for i in range(6)]
+    cols = ("calls", "input", "cached", "write", "output", "usd")
+    lines = ["round".ljust(12) + "".join(c.rjust(12) for c in cols)]
+    for name, r in list(rounds.items()) + [("total", total)]:
+        lines.append(name.ljust(12) + "".join(f"{v:,}".rjust(12) for v in r[:5]) + f"{r[5]:.2f}".rjust(12))
+    return "\n".join(lines)
+
+
+@app.command()
+def cost(ticker: str):
+    """Print the latest snapshot's model-call cost by round (tokens, cached tokens, USD)."""
+    from fundabot.db.session import connect
+    from fundabot.orchestrate import snapshot
+
+    conn = connect()
+    snap = snapshot.latest_for(conn, ticker)
+    if snap is None:
+        raise typer.Exit(f"no snapshot for {ticker}")
+    typer.echo(f"{ticker.upper()} snapshot {snap['id']}")
+    typer.echo(cost_table(conn, snap["id"]))
+
+
 JUDGE_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-5.4", "gemini": None}  # None = the adapter's default
+SCREEN_MODELS = {"anthropic": "claude-haiku-5-5", "openai": "gpt-5.4-mini", "gemini": "gemini-3.8-flash"}  # --tier screen: cheap personas, same judges
 
 
-def build_adapters(full: bool, providers: str, model: str, judges: int):
+def build_adapters(full: bool, providers: str, model: str, judges: int, tier: str = "default"):
     """Persona adapters for the run and judge adapters (only for --full). Missing keys fail here, loudly."""
+    if tier not in ("default", "screen"):
+        raise typer.BadParameter("--tier must be default or screen")
     provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
-    adapters = [make_adapter(p, model if p == "anthropic" else None) for p in provider_names]
+    adapters = [make_adapter(p, SCREEN_MODELS[p] if tier == "screen" else (model if p == "anthropic" else None)) for p in provider_names]
     if not full:
         return adapters, []
     if judges not in (1, 3):
@@ -150,7 +190,7 @@ def build_adapters(full: bool, providers: str, model: str, judges: int):
 
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
-            providers: str = "anthropic", full: bool = False, judges: int = 3,
+            providers: str = "anthropic", full: bool = False, judges: int = 3, tier: str = "default",
             open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
     """Run the persona agents over a fresh snapshot and write a report. --full: 3 providers, rebuttal round, judges, verdict."""
     import asyncio
@@ -163,7 +203,7 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    adapters, judge_adapters = build_adapters(full, providers, model, judges)
+    adapters, judge_adapters = build_adapters(full, providers, model, judges, tier)
     guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
     for t in tickers:
         try:
@@ -210,7 +250,7 @@ def watch_list():
         typer.echo(f"{e['ticker']:<8} cik {e['cik']:<10} added {e['added_at']:%Y-%m-%d}  last poll {e['last_poll'] or '-'}  {e['note'] or ''}")
 
 
-def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-sonnet-5-5", judges: int = 3):
+def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-sonnet-5-5", judges: int = 3, tier: str = "default"):
     """A runner that opens its own DB connection per ticker (connections are not safe to share across concurrent tickers)."""
     import json
     from pathlib import Path
@@ -219,7 +259,7 @@ def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-s
     from fundabot.orchestrate.pipeline import analyze as run, analyze_full
     from fundabot.retrieval.embed import OpenAIEmbedder
 
-    adapters, judge_adapters = build_adapters(full, providers, model, judges)
+    adapters, judge_adapters = build_adapters(full, providers, model, judges, tier)
     guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
 
     async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
@@ -243,7 +283,7 @@ PERSONAS_ALL = ["bull", "bear", "skeptic", "quality", "macro"]
 
 @app.command()
 def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str = "", full: bool = False, max_usd: float = 100.0,
-         providers: str = "anthropic", concurrency: int = 3):
+         providers: str = "anthropic", concurrency: int = 3, tier: str = "default"):
     """Analyze many tickers (cheap run by default, --full for the debate), stalest first, under a per-scan budget."""
     import asyncio
 
@@ -256,7 +296,7 @@ def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str
         names += [e["ticker"] for e in watchlist.entries(conn) if e["ticker"] not in names]
     if not names:
         raise typer.BadParameter("give --watchlist or --tickers A,B")
-    results = asyncio.run(watchlist.scan(conn, names, full, max_usd, scan_runner(full, providers), concurrency))
+    results = asyncio.run(watchlist.scan(conn, names, full, max_usd, scan_runner(full, providers, tier=tier), concurrency))
     for r in results:
         if r["status"] == "ok":
             typer.echo(f"{r['ticker']:<8} ok   composite {r.get('composite')}  dispersion {r.get('dispersion')}  {r.get('report')}")
@@ -283,14 +323,14 @@ def poll(dry_run: bool = False):
 
 
 @app.command()
-def worker(limit: int = 1, providers: str = "anthropic,openai,gemini"):
+def worker(limit: int = 1, providers: str = "anthropic,openai,gemini", tier: str = "default"):
     """Run queued full analyses whose wait has elapsed."""
     import asyncio
 
     from fundabot.db.session import connect
     from fundabot.orchestrate import triggers
 
-    runner = scan_runner(True, providers)
+    runner = scan_runner(True, providers, tier=tier)
 
     async def run_full(ticker):
         return (await runner(ticker, True, force=True))["report"]  # a new filing or transcript means a new snapshot

@@ -7,13 +7,14 @@ from fundabot.retrieval.chunk import Chunk
 
 # a minus counts only when not preceded by a digit, so "16-17%" is a range, not "-17%"
 NUMBER = re.compile(r"(\$)?\s?((?<!\d)-?\d[\d,]*(?:\.\d+)?)\s?(%|(?:bn|billion|mm|million|thousand|trillion|tn|b|m|k|x)\b)?", re.I)
+EVIDENCE_ID = re.compile(r"\b(?:chunk|metric):\S+")  # ids written inline in prose carry accession/CIK digits that are not figures
 MULT = {"k": 1e3, "thousand": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6, "b": 1e9, "bn": 1e9, "billion": 1e9, "tn": 1e12, "trillion": 1e12}
 
 
 def extract_numbers(text: str) -> list[tuple[str, float]]:
     """(matched text, normalized value). Skips years and bare small integers (counts, ordinals)."""
     out = []
-    for m in NUMBER.finditer(text):
+    for m in NUMBER.finditer(EVIDENCE_ID.sub(" ", text)):
         dollar, num, unit = m.group(1), m.group(2), (m.group(3) or "").lower()
         raw = float(num.replace(",", ""))
         is_int = "." not in num

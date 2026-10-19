@@ -62,18 +62,43 @@ async def test_openai_prefix_in_instructions_and_cached_cost(monkeypatch):
     assert r.cached_input_tokens == 30_000 and abs(r.cost_usd - (10_000 / 1e6 * 2.5 + 30_000 / 1e6 * 0.25 + 1_000 / 1e6 * 15.0)) < 1e-9
 
 
-async def test_gemini_prefix_in_system_instruction_and_cached_cost(monkeypatch):
+async def test_gemini_long_prefix_uses_one_explicit_cache(monkeypatch):
+    """Gemini's implicit cache misses whenever the user turn differs, so a long shared prefix becomes one explicit cache
+    (created once per adapter per prefix) and the persona tail travels with the user turn."""
     a = GeminiAdapter("gemini-3.1-pro-preview")
-    captured = {}
+    captured, created = {}, []
+
+    async def fake_create(**kw):
+        created.append(kw)
+        return NS(name="cachedContents/abc", usage_metadata=NS(total_token_count=30_000))
 
     async def fake_generate(**kw):
         captured.update(kw)
         return NS(text=json.dumps(GOOD), usage_metadata=NS(prompt_token_count=40_000, candidates_token_count=1_000, thoughts_token_count=0, cached_content_token_count=30_000),
                   candidates=[NS(finish_reason="STOP")])
+    monkeypatch.setattr(a._client.aio.caches, "create", fake_create)
     monkeypatch.setattr(a._client.aio.models, "generate_content", fake_generate)
     r = await a.complete("TAIL", "user", schemas.AGENT_OUTPUT_SCHEMA, prefix=LONG_PREFIX)
-    assert captured["config"].system_instruction.startswith(LONG_PREFIX) and captured["config"].system_instruction.endswith("TAIL")
-    assert r.cached_input_tokens == 30_000 and abs(r.cost_usd - (10_000 / 1e6 * 2.0 + 30_000 / 1e6 * 0.2 + 1_000 / 1e6 * 12.0)) < 1e-9
+    r2 = await a.complete("TAIL2", "user2", schemas.AGENT_OUTPUT_SCHEMA, prefix=LONG_PREFIX)
+    assert len(created) == 1 and created[0]["model"] == "gemini-3.1-pro-preview" and created[0]["config"].system_instruction == LONG_PREFIX
+    assert captured["config"].cached_content == "cachedContents/abc" and captured["config"].system_instruction is None
+    assert captured["contents"] == "TAIL2\n\nuser2"
+    # creating the cache bills the prefix once at the normal rate; that lands on the call that created it, as cache-write tokens
+    assert r.cache_write_tokens == 30_000 and abs(r.cost_usd - (10_000 / 1e6 * 2.0 + 30_000 / 1e6 * 0.2 + 30_000 / 1e6 * 2.0 + 1_000 / 1e6 * 12.0)) < 1e-9
+    assert r2.cache_write_tokens == 0 and r2.cached_input_tokens == 30_000 and abs(r2.cost_usd - (10_000 / 1e6 * 2.0 + 30_000 / 1e6 * 0.2 + 1_000 / 1e6 * 12.0)) < 1e-9
+
+
+async def test_gemini_short_prefix_is_concatenated(monkeypatch):
+    a = GeminiAdapter("gemini-3.1-pro-preview")
+    captured = {}
+
+    async def fake_generate(**kw):
+        captured.update(kw)
+        return NS(text=json.dumps(GOOD), usage_metadata=NS(prompt_token_count=100, candidates_token_count=10, thoughts_token_count=0, cached_content_token_count=None),
+                  candidates=[NS(finish_reason="STOP")])
+    monkeypatch.setattr(a._client.aio.models, "generate_content", fake_generate)
+    await a.complete("TAIL", "user", schemas.AGENT_OUTPUT_SCHEMA, prefix="short")
+    assert captured["config"].system_instruction == "short\n\nTAIL" and captured["config"].cached_content is None
 
 
 class Ordered(FakeAdapter):

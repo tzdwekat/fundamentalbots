@@ -106,3 +106,9 @@ def test_what_would_change_my_mind_is_exempt_from_number_checks():
     o["what_would_change_my_mind"] = ["FCF yield above 3.5%"]
     g = ground(o, METRICS, CHUNKS)
     assert g["risks_unsupported_numbers"] == ["99x"] and g["stats"]["numbers_total"] == 1
+
+
+def test_inline_evidence_ids_are_not_numbers():
+    # a model may write ids in prose; the CIK/accession digits inside them are not figures to verify
+    text = "Supply risk is structural. Evidence: chunk:0000320193-25-000079#item8-18, metric:pe_5y_max@current; margin was 46.2%."
+    assert [v for _, v in extract_numbers(text)] == [0.462]

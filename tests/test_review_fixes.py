@@ -166,3 +166,13 @@ async def test_grid_budget_checked_across_providers(db_conn, monkeypatch):
     with pytest.raises(BudgetExceeded):
         await run_grid(db_conn, sid, ["bull"], adapters, FakeEmbedder())
     assert sum(a.calls for a in adapters) == 0
+
+
+def test_screen_tier_only_affects_personas():
+    from fundabot.cli import build_adapters
+
+    adapters, judges = build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=3, tier="screen")
+    assert [a.model for a in adapters] == ["claude-haiku-5-5", "gpt-5.4-mini", "gemini-3.8-flash"]
+    assert [j.model for j in judges] == ["claude-opus-5-5", "gpt-5.4", "gemini-3.1-pro-preview"]  # judges keep the strong models
+    default, _ = build_adapters(full=False, providers="anthropic", model="claude-sonnet-5-5", judges=3)
+    assert [a.model for a in default] == ["claude-sonnet-5-5"]
