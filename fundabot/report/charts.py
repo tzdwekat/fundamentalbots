@@ -116,6 +116,73 @@ def line_chart(title: str, series: list[tuple[str, list[tuple[str, float | None]
     return "\n".join(out)
 
 
+EVENT_GLYPH = {"filing": ("rect", "var(--series-2)"), "news": ("circle", "var(--series-3)"), "earnings": ("diamond", "var(--series-4)"),
+               "transcript": ("diamond", "var(--series-4)"), "split": ("rect", "var(--series-2)"), "grade": ("triangle", "var(--series-3)")}
+
+
+def price_chart(title: str, closes: list[tuple[str, float]], ma50: list[tuple[str, float | None]], ma200: list[tuple[str, float | None]],
+                events: list[dict], highlights: list[str] = ()) -> str:
+    """Daily closes with the two moving averages, one marker per event (glyph by kind, <title> tooltip) on the close of
+    its date, and a ring on the highlighted (largest-move) dates. events: [{date, kind, title}] with date as in closes."""
+    xs = [x for x, _ in closes]
+    vals = [v for _, v in closes] + [v for _, v in ma50 + ma200 if v is not None]
+    if not xs or not vals:
+        return f'<svg class="chart" width="{W}" height="80" viewBox="0 0 {W} 80" role="img" aria-label="{escape(title)}"><text x="12" y="24" class="title">{escape(title)}</text><text x="12" y="52" class="muted">no data</text></svg>'
+    ticks = _ticks(min(vals), max(vals))
+    lo, hi = ticks[0], ticks[-1]
+    plot_w, plot_h = W - PAD_L - PAD_R, H - PAD_T - PAD_B
+    pos = {x: i for i, x in enumerate(xs)}
+
+    def sx(i):
+        return PAD_L + i * plot_w / max(1, len(xs) - 1)
+
+    def sy(v):
+        return PAD_T + plot_h - (v - lo) / (hi - lo) * plot_h
+    out = [f'<svg class="chart" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-label="{escape(title)}">', f'<text x="12" y="18" class="title">{escape(title)}</text>']
+    for t in ticks:
+        out.append(f'<line class="grid" x1="{PAD_L}" y1="{sy(t):.1f}" x2="{W - PAD_R}" y2="{sy(t):.1f}"/>')
+        out.append(f'<text x="{PAD_L - 6}" y="{sy(t) + 4:.1f}" class="muted" text-anchor="end">{escape(fmt_value(t, "usd"))}</text>')
+    step = max(1, len(xs) // 6)
+    for i, x in enumerate(xs):
+        if i % step == 0 or i == len(xs) - 1:
+            out.append(f'<text x="{sx(i):.1f}" y="{H - 14}" class="muted" text-anchor="middle">{escape(x[5:] if len(x) == 10 else x)}</text>')
+    for si, (label, pts) in enumerate((("close", closes), ("ma50", ma50), ("ma200", ma200))):
+        seg = [f"{sx(pos[x]):.1f},{sy(v):.1f}" for x, v in pts if v is not None and x in pos]
+        if len(seg) > 1:
+            out.append(f'<polyline class="line" stroke="var(--series-{si + 1})" points="{" ".join(seg)}"/>')
+    close_at = dict(closes)
+    for x in highlights:
+        if x in pos:
+            out.append(f'<circle class="highlight" cx="{sx(pos[x]):.1f}" cy="{sy(close_at[x]):.1f}" r="9" fill="none" stroke="var(--series-1)" stroke-width="2"><title>{escape(x)}: {escape(fmt_value(close_at[x], "usd"))}</title></circle>')
+    for e in events:
+        x = e["date"]
+        if x not in pos:
+            continue
+        cx, cy = sx(pos[x]), sy(close_at[x])
+        glyph, color = EVENT_GLYPH.get(e["kind"], ("circle", "var(--series-3)"))
+        tip = f"<title>{escape(x)} {escape(e['kind'])}: {escape(e['title'])}</title>"
+        cls = f'class="event event-{escape(e["kind"])}"'
+        if glyph == "rect":
+            out.append(f'<rect {cls} x="{cx - 4:.1f}" y="{cy - 4:.1f}" width="8" height="8" fill="{color}" stroke="var(--surface-1)" stroke-width="1.5">{tip}</rect>')
+        elif glyph == "diamond":
+            out.append(f'<polygon {cls} points="{cx:.1f},{cy - 6:.1f} {cx + 6:.1f},{cy:.1f} {cx:.1f},{cy + 6:.1f} {cx - 6:.1f},{cy:.1f}" fill="{color}" stroke="var(--surface-1)" stroke-width="1.5">{tip}</polygon>')
+        elif glyph == "triangle":
+            out.append(f'<polygon {cls} points="{cx:.1f},{cy - 6:.1f} {cx + 5:.1f},{cy + 4:.1f} {cx - 5:.1f},{cy + 4:.1f}" fill="{color}" stroke="var(--surface-1)" stroke-width="1.5">{tip}</polygon>')
+        else:
+            out.append(f'<circle {cls} cx="{cx:.1f}" cy="{cy:.1f}" r="4.5" fill="{color}" stroke="var(--surface-1)" stroke-width="1.5">{tip}</circle>')
+    x = PAD_L
+    out.append('<g class="legend">')
+    for si, label in enumerate(("close", "ma50", "ma200")):
+        out.append(f'<rect x="{x}" y="{PAD_T - 18}" width="10" height="10" rx="2" fill="var(--series-{si + 1})"/><text x="{x + 14}" y="{PAD_T - 9}" class="muted">{label}</text>')
+        x += 14 + 7 * len(label) + 18
+    for kind, (glyph, color) in EVENT_GLYPH.items():
+        if any(e["kind"] == kind for e in events):
+            out.append(f'<rect x="{x}" y="{PAD_T - 18}" width="10" height="10" rx="5" fill="{color}"/><text x="{x + 14}" y="{PAD_T - 9}" class="muted">{kind}</text>')
+            x += 14 + 7 * len(kind) + 18
+    out.append("</g></svg>")
+    return "\n".join(out)
+
+
 def range_bar(label: str, lo: float | None, median: float | None, hi: float | None, current: float | None, fmt: str = "x") -> str:
     """The current value marked on its own historical range (lo..hi) with the median; values outside are clamped and labelled."""
     h = 44

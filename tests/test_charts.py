@@ -47,3 +47,16 @@ def test_heatmap_cells_and_diverging_colors():
 def test_percent_and_usd_formatting():
     assert charts.fmt_value(0.4621, "pct") == "46.2%" and charts.fmt_value(391035e6, "usd") == "$391.0B" and charts.fmt_value(35.123, "x") == "35.1x"
     assert charts.fmt_value(2.5e6, "usd") == "$2.5M" and charts.fmt_value(-0.05, "pct") == "-5.0%"
+
+
+def test_price_chart_markers_and_highlights():
+    closes = [(f"2026-09-{d:02d}", 200.0 + d) for d in range(1, 29)]
+    ma50 = [(x, v - 5) for x, v in closes]
+    ma200 = [(x, None if i < 3 else v - 10) for i, (x, v) in enumerate(closes)]
+    events = [{"date": "2026-09-10", "kind": "filing", "title": "8-K"}, {"date": "2026-09-10", "kind": "news", "title": "Apple falls"}, {"date": "2026-09-20", "kind": "earnings", "title": "EPS 1.5 vs 1.4"}]
+    svg = charts.price_chart("AAPL close", closes, ma50, ma200, events, highlights=["2026-09-10"])
+    assert svg.startswith("<svg") and svg.count("<polyline") == 3  # close, ma50, ma200
+    assert svg.count('class="event event-filing"') == 1 and svg.count('class="event event-news"') == 1 and svg.count('class="event event-earnings"') == 1
+    assert svg.count('class="highlight"') == 1 and "Apple falls" in svg and svg.count("<title>") >= 3
+    assert "legend" in svg and "ma50" in svg and "ma200" in svg
+    assert 'fill="var(--series' not in svg.split("<text")[1]  # text never wears the series color
