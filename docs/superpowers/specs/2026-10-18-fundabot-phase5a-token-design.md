@@ -93,6 +93,25 @@ for two personas; adapter tests assert the Anthropic system block carries `cache
 cached rate from a stubbed usage; the end-to-end fake run asserts prefix identity across the five calls. Live: one
 cheap AAPL run with `--rerun`, then `fundabot cost AAPL` showing cache reads on calls 2-5.
 
+### Warm-up call (builder review)
+
+A provider's cache is populated only once the first response has begun, so five simultaneous calls all miss (and on
+Anthropic each pays the 1.25x write rate). `run_grid` therefore sends, per provider, the first persona call alone,
+then the remaining four concurrently (`run_batch(..., warm_first=True)`). Providers still run in parallel. Expected
+wall time for the cheap run: about 2.5 minutes instead of 2.
+
+### Budget split, periods, allowlist (builder review)
+
+- The excerpt budget is 20k tokens per persona in total: shared base-query chunks first (at most 12k, deduplicated,
+  retrieved once per grid), then the persona's own chunks fill the remainder, excluding ids already in the shared set.
+- `select_periods` (8 quarters) is unchanged for the judge; `select_metrics` uses the report's 4-quarter window, and
+  `grounding.ground` takes its "shown" values from `select_metrics` so support means "shown to the agent".
+- The shown set is defined by an allowlist in `context.py`, not by widening `table.GROUPS`: all GROUPS ids at the
+  shown periods; raw XBRL base items at fiscal years only; TTM items, every `*_5y_*` statistic and the DCF ids at
+  `current`; `*_cagr_3y/5y` at fiscal years; plus red-flag evidence ids. `tests/fixtures/cited_metric_ids.json`
+  (captured 2026-10-18 from the stored AAPL and NVDA runs: 326 evidence ids, 104 metric ids) must resolve inside it.
+
 ## Decisions left open (Tariq)
 
-None. Defaults: 20k excerpt budget, screen tier models as listed, cached-rate table per provider.
+None. Defaults: 20k excerpt budget (12k shared cap), screen tier models as listed, cached rates 0.1x of input for all
+three providers (OpenAI $0.25/M and Gemini $0.20/M per third-party pricing pages on 2026-10-18; Anthropic 0.1x documented).
