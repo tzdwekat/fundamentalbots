@@ -33,7 +33,23 @@ def embed_missing(conn: psycopg.Connection, embedder: Embedder, accessions: list
     return added
 
 
-def retrieve(conn: psycopg.Connection, embedder: Embedder, accessions: list[str], queries: list[str], top_k: int = 8, max_tokens: int = 30000) -> list[Chunk]:
+def dedupe_boilerplate(chunks: list[Chunk], accession_rank: dict[str, int]) -> list[Chunk]:
+    """Drop chunks whose first 200 normalized characters repeat an already-kept chunk (10-Q boilerplate across quarters);
+    the chunk from the newest accession (lowest rank) wins. Order of the input is preserved otherwise."""
+    import re
+    ranked = sorted(chunks, key=lambda c: accession_rank.get(c.accession, 10**6))
+    seen, keep_ids = {}, set()
+    for c in ranked:
+        key = re.sub(r"\s+", " ", c.text[:200]).strip().lower()
+        if key in seen:
+            continue
+        seen[key] = c.id
+        keep_ids.add(c.id)
+    return [c for c in chunks if c.id in keep_ids]
+
+
+def retrieve(conn: psycopg.Connection, embedder: Embedder, accessions: list[str], queries: list[str], top_k: int = 8, max_tokens: int = 20000,
+             exclude_ids=frozenset()) -> list[Chunk]:
     """Top-k chunks per query by cosine similarity within the accessions, deduplicated, best first, capped by tokens."""
     best: dict[str, tuple[float, Chunk]] = {}
     for vec in embedder.embed(queries):
@@ -42,6 +58,8 @@ def retrieve(conn: psycopg.Connection, embedder: Embedder, accessions: list[str]
             cur.execute("SELECT id, accession, item, n, text, token_count, 1 - (embedding <=> %s) AS score FROM chunks "
                         "WHERE accession = ANY(%s) AND embedding IS NOT NULL ORDER BY embedding <=> %s LIMIT %s", (v, accessions, v, top_k))
             for cid, acc, item, n, text, tokens, score in cur.fetchall():
+                if cid in exclude_ids:
+                    continue
                 if cid not in best or score > best[cid][0]:
                     best[cid] = (float(score), Chunk(cid, acc, item, n, text, tokens))
     out, used = [], 0

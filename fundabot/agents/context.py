@@ -37,6 +37,35 @@ def select_periods(metrics: list[Metric]) -> set[str]:
     return set(fys) | set(qs) | {"current"}
 
 
+def select_metrics(metrics: list[Metric], flags=()) -> list[Metric]:
+    """The metrics an agent is shown (and what counts as "shown" for grounding): report-group ids at the report's
+    columns (5 FY, 4 Q, current), raw XBRL items at fiscal years only, TTM / 5-year-range / DCF ids at current,
+    CAGRs at fiscal years, plus any red-flag evidence id."""
+    from fundabot.report.table import GROUPS, columns_for
+
+    cols = set(columns_for(metrics))
+    fys = {c for c in cols if c.startswith("FY")}
+    group_ids = {m for g in GROUPS.values() for m in g}
+    flagged = {e.split(":", 1)[1] for f in flags for e in f.evidence if e.startswith("metric:")}
+    out = []
+    for m in metrics:
+        key = f"{m.metric_id}@{m.period}"
+        if key in flagged or m.metric_id in flagged:
+            out.append(m)
+            continue
+        if m.period not in cols:
+            continue
+        if m.metric_id in group_ids:
+            out.append(m)
+        elif m.formula_id.startswith("xbrl:") and m.period in fys:
+            out.append(m)
+        elif m.period == "current" and (m.metric_id.endswith("_ttm") or "_5y_" in m.metric_id or m.metric_id.startswith("dcf") or m.metric_id == "reverse_dcf_implied_growth"):
+            out.append(m)
+        elif m.period in fys and (m.metric_id.endswith(("_cagr_3y", "_cagr_5y", "_yoy")) or m.metric_id in ("ebitda", "fcf", "total_debt", "net_debt", "gross_profit", "total_debt_reported")):
+            out.append(m)
+    return sorted(out, key=lambda m: (m.metric_id, m.period))
+
+
 def metric_line(m: Metric) -> str:
     head = f"metric:{m.metric_id}@{m.period} = "
     if m.value is None:
@@ -51,7 +80,7 @@ def build_user_message(ticker: str, snapshot: dict, metrics: list[Metric], flags
     lines = [f"SNAPSHOT\nticker: {ticker}\nsnapshot_id: {snapshot['id']}\nprice_date: {snapshot.get('price_date')}\n"
              f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}", ""]
     lines.append("METRICS (one per line: id@period = value unit [flags] <- formula; cite by id)")
-    for m in sorted((m for m in metrics if m.period in keep), key=lambda m: (m.metric_id, m.period)):
+    for m in select_metrics(metrics, flags):
         lines.append(metric_line(m))
     lines += ["", "RED_FLAGS (rules engine)"]
     lines += [f"{f.flag_id} [{f.severity}]: {f.detail} evidence={json.dumps(f.evidence)}" for f in flags] or ["none"]
