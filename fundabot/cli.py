@@ -70,7 +70,6 @@ def verify(ticker: str):
     typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
 
 
-GUIDANCE_MODEL = "claude-haiku-5-5"  # transcript guidance extraction, ~$0.01 per call
 JUDGE_MAX_TOKENS = 20000  # a judge scores every surviving claim (70+ on a full run) with notes
 
 
@@ -211,7 +210,7 @@ def judge_ab_table(old: dict, new: dict) -> str:
 
 
 @app.command("judge-ab")
-def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judges: int = 3, out_dir: str = "reports"):
+def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judges: int = 3, out_dir: str = "reports", profile: str = "multi"):
     """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""
     import asyncio
     from pathlib import Path
@@ -235,7 +234,7 @@ def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judg
     else:  # the previous pipeline's round-2 rows (no _escalated marker) are about to be overwritten: keep their per-claim means
         rows = [j for j in judge.load_judgements(conn, sid, 2) if "_escalated" not in j["output"]]
         baseline = judge.mean_scores(rows, sorted({c["claim_id"] for j in rows for c in j["output"]["claims"]}))
-    adapters, screen_judges, judge_adapters = build_adapters(True, providers, "claude-sonnet-5-5", judges)
+    adapters, screen_judges, judge_adapters, _ = build_adapters(True, providers, None, judges, profile=profile)
     asyncio.run(analyze_full(conn, ticker, PERSONAS_ALL, adapters, screen_judges, judge_adapters, OpenAIEmbedder(), out_dir=Path(out_dir), run_kind="triage", snapshot_id=sid))
     with conn.cursor() as cur:
         cur.execute("UPDATE verdicts SET verdict = verdict || %s WHERE snapshot_id = %s AND run_kind = 'triage' RETURNING verdict", (Jsonb({"baseline_claim_means": baseline}), sid))
@@ -245,32 +244,53 @@ def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judg
     typer.echo(judge_ab_table(old, new))
 
 
-JUDGE_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-5.4", "gemini": None}  # None = the adapter's default
-SCREEN_MODELS = {"anthropic": "claude-haiku-5-5", "openai": "gpt-5.4-mini", "gemini": "gemini-3.8-flash"}  # --tier screen: cheap personas, same judges
+from fundabot import profiles as _profiles  # noqa: E402
+
+_MULTI = _profiles.load("multi")
+JUDGE_MODELS = _MULTI["escalation"]  # the strong panel (views of the `multi` profile; see fundabot/profiles.yaml)
+SCREEN_MODELS = _MULTI["screen"]  # --tier screen: cheap personas, same judges
 
 
 SCREEN_JUDGE_MODELS = SCREEN_MODELS  # the screen panel: one cheap judge per provider scores every claim first
 
 
-def build_adapters(full: bool, providers: str, model: str, judges: int, tier: str = "default"):
-    """(persona adapters, screen judges, escalation judges); the judge panels are empty unless --full. Missing keys fail here, loudly."""
+def build_adapters(full: bool, providers: str, model: str | None, judges: int, tier: str = "default", profile: str = "multi"):
+    """(persona adapters, screen judges, escalation judges, guidance adapter) from the profile. The judge panels are empty
+    unless --full; --providers narrows the persona set within the profile; --judges 1 keeps each panel's first provider;
+    --model overrides the Anthropic persona model. Missing keys fail here, loudly."""
     if tier not in ("default", "screen"):
         raise typer.BadParameter("--tier must be default or screen")
-    provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
-    adapters = [make_adapter(p, SCREEN_MODELS[p] if tier == "screen" else (model if p == "anthropic" else None)) for p in provider_names]
+    try:
+        prof = _profiles.load(profile)
+    except KeyError as e:
+        raise typer.BadParameter(str(e))
+    persona_models = dict(prof["screen"] if tier == "screen" else prof["personas"])
+    if model and "anthropic" in persona_models and tier != "screen":
+        persona_models["anthropic"] = model
+    wanted = [p.strip() for p in providers.split(",") if p.strip()]
+    if full and wanted == ["anthropic"]:  # the historical default: --full means every provider the profile has
+        wanted = list(persona_models)
+    unknown = [p for p in wanted if p not in persona_models]
+    if unknown:
+        raise typer.BadParameter(f"profile {profile!r} has no persona provider {unknown}; it has {list(persona_models)}")
+    adapters = [make_adapter(p, persona_models[p]) for p in wanted]
+    (gp, gm), = prof["guidance"].items()
+    guidance = make_adapter(gp, gm, 8000)
     if not full:
-        return adapters, [], []
+        return adapters, [], [], guidance
     if judges not in (1, 3):
         raise typer.BadParameter("--judges must be 1 or 3")
-    panel = ["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"]
-    screen = [make_adapter(p, SCREEN_JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in panel]
-    judge_adapters = [make_adapter(p, JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in panel]
-    return adapters, screen, judge_adapters
+    screen_models, strong_models = prof["screen"], prof["escalation"]
+    if judges == 1:
+        screen_models, strong_models = dict([next(iter(screen_models.items()))]), dict([next(iter(strong_models.items()))])
+    screen = [make_adapter(p, m, JUDGE_MAX_TOKENS) for p, m in screen_models.items()]
+    judge_adapters = [make_adapter(p, m, JUDGE_MAX_TOKENS) for p, m in strong_models.items()]
+    return adapters, screen, judge_adapters, guidance
 
 
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
-            providers: str = "anthropic", full: bool = False, judges: int = 3, tier: str = "default",
+            providers: str = "anthropic", full: bool = False, judges: int = 3, tier: str = "default", profile: str = "multi",
             open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
     """Run the persona agents over a fresh snapshot and write a report. --full: 3 providers, rebuttal round, judges, verdict."""
     import asyncio
@@ -283,8 +303,7 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    adapters, screen_judges, judge_adapters = build_adapters(full, providers, model, judges, tier)
-    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
+    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile)
     for t in tickers:
         try:
             if full:
@@ -330,7 +349,7 @@ def watch_list():
         typer.echo(f"{e['ticker']:<8} cik {e['cik']:<10} added {e['added_at']:%Y-%m-%d}  last poll {e['last_poll'] or '-'}  {e['note'] or ''}")
 
 
-def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-sonnet-5-5", judges: int = 3, tier: str = "default"):
+def scan_runner(full: bool, providers: str = "anthropic", model: str | None = None, judges: int = 3, tier: str = "default", profile: str = "multi"):
     """A runner that opens its own DB connection per ticker (connections are not safe to share across concurrent tickers)."""
     import json
     from pathlib import Path
@@ -339,8 +358,7 @@ def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-s
     from fundabot.orchestrate.pipeline import analyze as run, analyze_full
     from fundabot.retrieval.embed import OpenAIEmbedder
 
-    adapters, screen_judges, judge_adapters = build_adapters(full, providers, model, judges, tier)
-    guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
+    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile)
 
     async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
         conn = connect()
@@ -363,7 +381,7 @@ PERSONAS_ALL = ["bull", "bear", "skeptic", "quality", "macro"]
 
 @app.command()
 def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str = "", full: bool = False, max_usd: float = 100.0,
-         providers: str = "anthropic", concurrency: int = 3, tier: str = "default"):
+         providers: str = "anthropic", concurrency: int = 3, tier: str = "default", profile: str = "multi"):
     """Analyze many tickers (cheap run by default, --full for the debate), stalest first, under a per-scan budget."""
     import asyncio
 
@@ -376,7 +394,7 @@ def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str
         names += [e["ticker"] for e in watchlist.entries(conn) if e["ticker"] not in names]
     if not names:
         raise typer.BadParameter("give --watchlist or --tickers A,B")
-    results = asyncio.run(watchlist.scan(conn, names, full, max_usd, scan_runner(full, providers, tier=tier), concurrency))
+    results = asyncio.run(watchlist.scan(conn, names, full, max_usd, scan_runner(full, providers, tier=tier, profile=profile), concurrency))
     for r in results:
         if r["status"] == "ok":
             typer.echo(f"{r['ticker']:<8} ok   composite {r.get('composite')}  dispersion {r.get('dispersion')}  {r.get('report')}")
@@ -403,14 +421,14 @@ def poll(dry_run: bool = False):
 
 
 @app.command()
-def worker(limit: int = 1, providers: str = "anthropic,openai,gemini", tier: str = "default"):
+def worker(limit: int = 1, providers: str = "anthropic,openai,gemini", tier: str = "default", profile: str = "multi"):
     """Run queued full analyses whose wait has elapsed."""
     import asyncio
 
     from fundabot.db.session import connect
     from fundabot.orchestrate import triggers
 
-    runner = scan_runner(True, providers, tier=tier)
+    runner = scan_runner(True, providers, tier=tier, profile=profile)
 
     async def run_full(ticker):
         return (await runner(ticker, True, force=True))["report"]  # a new filing or transcript means a new snapshot

@@ -1,0 +1,24 @@
+# Provider profiles: which provider and model fills each role. `--profile NAME` on analyze / scan / worker / judge-ab.
+# Roles: personas (the five biased agents and their rebuttals), screen (cheap judge panel, every claim),
+# escalation (strong judge panel, disputed and material claims), guidance (transcript guidance extraction).
+# Embeddings always use OpenAI (the only embedder). Add a profile by adding a key; every role is required.
+multi:
+  personas:   {anthropic: claude-sonnet-5-5, openai: gpt-5.4, gemini: gemini-3.1-pro-preview}
+  screen:     {anthropic: claude-haiku-5-5, openai: gpt-5.4-mini, gemini: gemini-3.8-flash}
+  escalation: {anthropic: claude-opus-5-5, openai: gpt-5.4, gemini: gemini-3.1-pro-preview}
+  guidance:   {anthropic: claude-haiku-5-5}
+anthropic:
+  personas:   {anthropic: claude-sonnet-5-5}
+  screen:     {anthropic: claude-haiku-5-5}
+  escalation: {anthropic: claude-opus-5-5}
+  guidance:   {anthropic: claude-haiku-5-5}
+openai:
+  personas:   {openai: gpt-5.4}
+  screen:     {openai: gpt-5.4-mini}
+  escalation: {openai: gpt-5.4}
+  guidance:   {openai: gpt-5.4-mini}
+gemini:
+  personas:   {gemini: gemini-3.1-pro-preview}
+  screen:     {gemini: gemini-3.8-flash}
+  escalation: {gemini: gemini-3.1-pro-preview}
+  guidance:   {gemini: gemini-3.8-flash}
