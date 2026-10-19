@@ -11,7 +11,7 @@ import pytest
 from fundabot.agents import schemas
 from fundabot.agents.adapters.fake import FakeAdapter
 from fundabot.config import settings
-from tests.test_full_pipeline import calls, fmp_fixture, persona_fake, rebuttal_or_judge  # noqa: F401
+from tests.test_full_pipeline import calls, fmp_fixture, persona_fake, rebuttal_or_judge, screen_fake  # noqa: F401
 from tests.test_pipeline import PERSONAS, fixture_prepare  # noqa: F401
 
 GOOD = {"thesis": "t", "claims": [], "key_risks": [], "what_would_change_my_mind": [], "score": 1, "confidence": 0.5}
@@ -57,7 +57,8 @@ async def test_full_with_no_surviving_judge_raises_and_stores_no_verdict(fixture
 
     conn = fixture_prepare
     with pytest.raises(RuntimeError, match="no judge"):
-        await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], [Failing("anthropic")], __import__("fundabot.retrieval.embed", fromlist=["FakeEmbedder"]).FakeEmbedder(), out_dir=tmp_path)
+        await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], [screen_fake("anthropic")], [Failing("anthropic")],
+                                    __import__("fundabot.retrieval.embed", fromlist=["FakeEmbedder"]).FakeEmbedder(), out_dir=tmp_path)
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM verdicts")
         assert cur.fetchone()[0] == 0
@@ -69,10 +70,10 @@ async def test_new_cells_invalidate_rebuttals_and_judgements(fixture_prepare, fm
     from fundabot.retrieval.embed import FakeEmbedder
 
     conn = fixture_prepare
-    judges = [rebuttal_or_judge("anthropic")]
-    await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], judges, FakeEmbedder(), out_dir=tmp_path)
+    screen, judges = [screen_fake("anthropic")], [rebuttal_or_judge("anthropic")]
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], screen, judges, FakeEmbedder(), out_dir=tmp_path)
     assert calls(judges) == 1
-    await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic"), persona_fake("openai")], judges, FakeEmbedder(), out_dir=tmp_path)
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic"), persona_fake("openai")], screen, judges, FakeEmbedder(), out_dir=tmp_path)
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM rebuttals"); n_reb = cur.fetchone()[0]
         cur.execute("SELECT verdict FROM verdicts"); v = cur.fetchone()[0]
@@ -121,7 +122,7 @@ async def test_catalysts_and_summaries_are_checked(fixture_prepare, fmp_fixture,
         o["one_paragraph_summary"] = "Revenue of $999 billion and a gross margin of 46.2%."
         return o
     base.outputs = out
-    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], [base], FakeEmbedder(), out_dir=tmp_path)
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], [screen_fake("anthropic")], [base], FakeEmbedder(), out_dir=tmp_path)
     with conn.cursor() as cur:
         cur.execute("SELECT verdict FROM verdicts"); v = cur.fetchone()[0]
     assert [c["what"] for c in v["catalysts"]] == ["real"]

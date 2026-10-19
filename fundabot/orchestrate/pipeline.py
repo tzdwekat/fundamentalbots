@@ -175,20 +175,26 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     return html
 
 
-async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str], adapters: list, judges: list, embedder,
-                       force: bool = False, rerun: bool = False, out_dir: Path = Path("reports"), guidance_adapter=None) -> Path:
-    """Grid -> rebuttal -> three judges + reconcile -> scoring -> verdict report. Every round is cached per snapshot."""
+async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str], adapters: list, screen_judges: list, judges: list, embedder,
+                       force: bool = False, rerun: bool = False, out_dir: Path = Path("reports"), guidance_adapter=None,
+                       run_kind: str = "full", snapshot_id: str | None = None) -> Path:
+    """Grid -> rebuttal -> screen panel (every claim) -> escalation panel (disputed / material claims, with evidence) -> scoring
+    -> verdict report. Every round is cached per snapshot. snapshot_id: re-judge that stored snapshot (no prepare, no guidance);
+    run_kind names the verdicts row and the report file."""
     from fundabot.agents.runner import run_grid
     from fundabot.debate import claims, judge, rebuttal, scoring
     from fundabot.eval import grounding
     from fundabot.report.render import render_verdict
     from fundabot.retrieval.query import embed_missing, load_chunks
 
-    with _stage(ticker, "prepare"):
-        sid = prepare(conn, ticker, force=force)
-    if guidance_adapter is not None:
-        with _stage(ticker, "guidance"):
-            await ensure_guidance(conn, sid, guidance_adapter)
+    if snapshot_id is None:
+        with _stage(ticker, "prepare"):
+            sid = prepare(conn, ticker, force=force)
+        if guidance_adapter is not None:
+            with _stage(ticker, "guidance"):
+                await ensure_guidance(conn, sid, guidance_adapter)
+    else:
+        sid = snapshot_id
     s = snapshot.load(conn, sid)
     with _stage(ticker, "embed"):
         embed_missing(conn, embedder, s["accessions"])
@@ -224,16 +230,32 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
         revised.setdefault(a["agent"], (a["grounded"]["score"], a["grounded"]["confidence"]))
 
     judged = judge.precheck(pool, resolvable)
-    ids = sorted({e for c in judged for e in c["evidence"]} | {e for c in judged for r in c["refutations"] for e in r["evidence"]})
     earnings_available = any("vendor_fmp" in m.flags and m.value is not None for m in metrics)
-    message = judge.build_message(judged, flags, metrics, earnings_available, claims.evidence_text(ids, metrics, chunks_by_id, accessions), revised)
+
+    def evidence_for(claims_subset):
+        ids = sorted({e for c in claims_subset for e in c["evidence"]} | {e for c in claims_subset for r in c["refutations"] for e in r["evidence"]})
+        return claims.evidence_text(ids, metrics, chunks_by_id, accessions)
+
     with _stage(ticker, "judges"):
-        round1 = await judge.run_judges(conn, sid, judges, message)
-        if not round1:
+        round1 = await judge.run_judges(conn, sid, screen_judges, judge.build_message(judged, flags, metrics, earnings_available, evidence_for(judged), revised))
+        judged_ids = [c["id"] for c in judged]
+        if round1:
+            escalated = judge.escalate(round1, judged, len(screen_judges))
+        else:
+            log.warning("%s: no screen judge succeeded; the strong panel judges every claim", ticker)
+            escalated = sorted(judged_ids)
+        screen_means = judge.mean_scores(round1, judged_ids)
+        esc_pool = [c for c in judged if c["id"] in set(escalated)]
+        unanimous = [(c, screen_means[c["id"]]) for c in judged if c["id"] not in set(escalated)]
+        message2 = judge.build_escalation_message(esc_pool, round1, unanimous, flags, metrics, earnings_available, evidence_for(esc_pool), revised)
+        strong = await judge.run_escalation(conn, sid, judges, {j.provider: message2 for j in judges}, escalated)
+        if not strong:
             raise RuntimeError(f"{ticker}: no judge succeeded; no verdict produced")
-        reconciled = await judge.run_reconcile(conn, sid, judges, round1) if len(round1) > 1 else round1
-    means = judge.mean_scores(reconciled, [c["id"] for c in judged])
-    implied = [scoring.implied_composite(judged, j["output"], revised) for j in reconciled]
+    means = judge.merge_panels(screen_means, judge.mean_scores(strong, escalated), escalated)
+    passthrough = {k: v for k, v in means.items() if v["path"] == "screen"}
+    implied = [scoring.implied_from_means(judged, {**passthrough, **{c["claim_id"]: {"evidence_strength": float(c["evidence_strength"])} for c in j["output"]["claims"]}}, revised)
+               for j in strong]
+    reconciled = strong  # the strong panel supplies sub-scores, catalysts and summaries
     cells = {(a["persona"], a["provider"]): {"score": a["grounded"]["score"], "confidence": a["grounded"]["confidence"],
                                              "hallucination_rate": a["grounded"]["stats"]["hallucination_rate"], "model": a["model"]} for a in analyses}
     raw_catalysts = [{**c, "evidence": [e for e in c["evidence"] if resolvable(e)]} for j in reconciled for c in j["output"]["catalysts"]]
@@ -243,12 +265,14 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
                                       for j in reconciled}
     verdict["providers"] = [a.provider for a in adapters]
     verdict["judges"] = [{"provider": j["provider"], "model": j["model"]} for j in reconciled]
+    verdict["screen_judges"] = [{"provider": j["provider"], "model": j["model"]} for j in round1]
+    verdict["escalated_ids"], verdict["n_claims"] = escalated, len(judged)
     with conn.cursor() as cur:
-        cur.execute("INSERT INTO verdicts (snapshot_id, run_kind, verdict) VALUES (%s, 'full', %s) ON CONFLICT (snapshot_id, run_kind) DO UPDATE SET verdict = EXCLUDED.verdict, created_at = now()",
-                    (sid, Jsonb(verdict)))
+        cur.execute("INSERT INTO verdicts (snapshot_id, run_kind, verdict) VALUES (%s, %s, %s) ON CONFLICT (snapshot_id, run_kind) DO UPDATE SET verdict = EXCLUDED.verdict, created_at = now()",
+                    (sid, run_kind, Jsonb(verdict)))
         cur.execute("SELECT accession, form, filed FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (accessions,))
         filings = [dict(zip(["accession", "form", "filed"], r)) for r in cur.fetchall()]
     conn.commit()
-    _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir)
+    _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir, run_kind)
     log.info("%s: verdict %s composite %s", ticker, html, verdict["composite_score"])
     return html

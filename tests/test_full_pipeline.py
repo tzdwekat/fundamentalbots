@@ -36,14 +36,23 @@ def rebuttal_or_judge(provider):
             opp = re.findall(r"^(\S+/\S+#\d+) by", user, re.M)
             return {"responses": [{"claim_id": opp[0], "verdict": "concede", "reason": "fair", "evidence": []}] if opp else [],
                     "withdraws": [], "revised_score": 2, "revised_confidence": 0.6}
-        ids = re.findall(r"^(\S+/\S+#\d+) by", user, re.M) if "CLAIMS (after rebuttal)" in user else re.findall(r'"claim_id": "([^"]+)"', user)
-        return {"claims": [{"claim_id": i, "evidence_strength": 4, "materiality": 3, "note": ""} for i in dict.fromkeys(ids)],
+        ids = re.findall(r"^(\S+/\S+#\d+) by", user.split("SCREEN_PANEL_SCORES")[0], re.M)  # the CLAIMS block only, never UNANIMOUS_CLAIMS
+        return {"claims": [{"claim_id": i, "evidence_strength": 4, "materiality": 4 if "bear" in i else 3, "note": ""} for i in dict.fromkeys(ids)],
                 "quality_score": 70, "value_score": 40, "earnings_momentum_score": 60, "accounting_risk_score": 20,
                 "catalysts": [{"what": "new products", "when": "FY2027", "evidence": ["metric:revenue@FY2024"]}],
                 "one_paragraph_summary": f"{provider} judge summary"}
     a = FakeAdapter(out)
     a.provider, a.model = provider, f"{provider}-judge"
     return a
+
+
+def screen_fake(provider):
+    a = rebuttal_or_judge(provider)
+    a.model = f"{provider}-screen"
+    return a
+
+
+PROVIDERS = ("anthropic", "openai", "gemini")
 
 
 @pytest.fixture
@@ -59,10 +68,10 @@ def calls(adapters):
 @pytest.mark.db
 async def test_full_run_call_counts_and_verdict(fixture_prepare, fmp_fixture, tmp_path):
     conn = fixture_prepare
-    personas = [persona_fake(p) for p in ("anthropic", "openai", "gemini")]
-    judges = [rebuttal_or_judge(p) for p in ("anthropic", "openai", "gemini")]
-    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
-    assert calls(personas) == 15 + 15 and calls(judges) == 3 + 3  # personas also answer their own rebuttals; judges do both rounds
+    personas = [persona_fake(p) for p in PROVIDERS]
+    screen, judges = [screen_fake(p) for p in PROVIDERS], [rebuttal_or_judge(p) for p in PROVIDERS]
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    assert calls(personas) == 15 + 15 and calls(screen) == 3 and calls(judges) == 3  # personas also answer their own rebuttals; one round per panel
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM rebuttals"); assert cur.fetchone()[0] == 15
         cur.execute("SELECT count(*) FROM judgements"); assert cur.fetchone()[0] == 6
@@ -72,35 +81,78 @@ async def test_full_run_call_counts_and_verdict(fixture_prepare, fmp_fixture, tm
     for k in ("composite_score", "dispersion", "judge_agreement", "grid", "consensus_claims", "contested_claims", "one_paragraph_summary", "earnings_momentum_score"):
         assert k in v
     assert len(v["grid"]) == 15 and v["one_paragraph_summary"].endswith("judge summary") and v["catalysts"]
+    listed = v["consensus_claims"] + v["contested_claims"]
+    assert v["n_claims"] > len(v["escalated_ids"]) > 0 and all(i.startswith("bear") or "/" in i for i in v["escalated_ids"])
+    assert all(c["judge"]["path"] in ("screen", "escalated") for c in listed)
+    assert {c["judge"]["path"] for c in listed} == {"screen", "escalated"}  # bear claims (materiality 4) escalate; the rest pass through
+    assert all((c["id"] in v["escalated_ids"]) == (c["judge"]["path"] == "escalated") for c in listed)
+    assert v["screen_judges"][0]["model"] == "anthropic-screen" and v["judges"][0]["model"] == "anthropic-judge"
     md = html.with_suffix(".md").read_text()
     assert html.name.endswith("-full.html") and "Judge agreement" in md and "bull" in md and "contested" in md.lower()
+    assert "claims escalated" in md and "escalation panel" in md and "screen panel" in md
     assert "anthropic judge summary" in md and "openai judge summary" in md and "eps_surprise" in md
 
 
 @pytest.mark.db
 async def test_full_rerun_zero_calls(fixture_prepare, fmp_fixture, tmp_path):
     conn = fixture_prepare
-    personas = [persona_fake(p) for p in ("anthropic", "openai", "gemini")]
-    judges = [rebuttal_or_judge(p) for p in ("anthropic", "openai", "gemini")]
-    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
-    n1 = calls(personas) + calls(judges)
-    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
-    assert calls(personas) + calls(judges) == n1
-    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), rerun=True, out_dir=tmp_path)
-    assert calls(personas) + calls(judges) == 2 * n1
+    personas = [persona_fake(p) for p in PROVIDERS]
+    screen, judges = [screen_fake(p) for p in PROVIDERS], [rebuttal_or_judge(p) for p in PROVIDERS]
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    n1 = calls(personas) + calls(screen) + calls(judges)
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    assert calls(personas) + calls(screen) + calls(judges) == n1
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), rerun=True, out_dir=tmp_path)
+    assert calls(personas) + calls(screen) + calls(judges) == 2 * n1
 
 
 @pytest.mark.db
 async def test_full_with_one_judge(fixture_prepare, fmp_fixture, tmp_path):
     conn = fixture_prepare
     personas = [persona_fake("anthropic")]
-    judges = [rebuttal_or_judge("anthropic")]
-    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
-    assert calls(personas) == 10 and calls(judges) == 1  # no reconcile round with a single judge
+    screen, judges = [screen_fake("anthropic")], [rebuttal_or_judge("anthropic")]
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    assert calls(personas) == 10 and calls(screen) == 1 and calls(judges) == 1
     with conn.cursor() as cur:
         cur.execute("SELECT verdict FROM verdicts WHERE run_kind = 'full'")
         v = cur.fetchone()[0]
     assert v["judge_agreement"] == 1.0 and v["median_judge"] == "anthropic" and html.exists()
+    listed = v["consensus_claims"] + v["contested_claims"]
+    assert {c["judge"]["path"] for c in listed} == {"screen", "escalated"}  # a single screen judge does not escalate everything
+
+
+@pytest.mark.db
+async def test_full_with_screen_panel_down_escalates_everything(fixture_prepare, fmp_fixture, tmp_path):
+    conn = fixture_prepare
+    down = FakeAdapter([RuntimeError("down")])
+    down.provider, down.model = "anthropic", "anthropic-screen"
+    personas, judges = [persona_fake("anthropic")], [rebuttal_or_judge("anthropic")]
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, [down], judges, FakeEmbedder(), out_dir=tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("SELECT verdict FROM verdicts WHERE run_kind = 'full'")
+        v = cur.fetchone()[0]
+    assert len(v["escalated_ids"]) == v["n_claims"] > 0 and calls(judges) == 1 and html.exists()
+    assert all(c["judge"]["path"] == "escalated" for c in v["consensus_claims"] + v["contested_claims"])
+
+
+@pytest.mark.db
+async def test_snapshot_id_skips_prepare_and_writes_run_kind(fixture_prepare, fmp_fixture, tmp_path, monkeypatch):
+    conn = fixture_prepare
+    personas, screen, judges = [persona_fake("anthropic")], [screen_fake("anthropic")], [rebuttal_or_judge("anthropic")]
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("SELECT snapshot_id, verdict FROM verdicts WHERE run_kind = 'full'"); sid, full = cur.fetchone()
+
+    def boom(*a, **k):
+        raise AssertionError("prepare must not run")
+    monkeypatch.setattr(pipeline, "prepare", boom)
+    n = calls(personas) + calls(screen) + calls(judges)
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path, run_kind="triage", snapshot_id=sid)
+    assert html.name.endswith("-triage.html") and calls(personas) + calls(screen) + calls(judges) == n  # every round cached
+    with conn.cursor() as cur:
+        cur.execute("SELECT run_kind, verdict FROM verdicts WHERE snapshot_id = %s ORDER BY run_kind", (sid,))
+        rows = dict(cur.fetchall())
+    assert set(rows) == {"full", "triage"} and rows["full"] == full
 
 
 @pytest.mark.db
@@ -108,6 +160,6 @@ async def test_verdict_report_has_heatmap(fixture_prepare, fmp_fixture, tmp_path
     conn = fixture_prepare
     personas = [persona_fake(p) for p in ("anthropic", "openai")]
     judges = [rebuttal_or_judge("anthropic")]
-    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, judges, FakeEmbedder(), out_dir=tmp_path)
+    html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, [screen_fake("anthropic")], judges, FakeEmbedder(), out_dir=tmp_path)
     text = html.read_text()
     assert 'class="cell"' in text and text.count('class="cell"') == 10 and "<svg" in text

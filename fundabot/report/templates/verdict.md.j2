@@ -1,6 +1,6 @@
 # {{ ticker }} verdict
 
-snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · providers {{ verdict.providers|join(", ") }} · judges {% for j in verdict.judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% endfor %}
+snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · providers {{ verdict.providers|join(", ") }} · screen panel {% for j in verdict.screen_judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% else %}none{% endfor %} · escalation panel {% for j in verdict.judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% endfor %} · {{ verdict.escalated_ids|length }} of {{ verdict.n_claims }} claims escalated
 
 ## Summary (median judge: {{ verdict.median_judge }})
 
@@ -31,7 +31,7 @@ Revised scores after rebuttal: {% for a, s in verdict.revised_scores|dictsort %}
 ## Most contested claims
 
 {% for c in verdict.contested_claims[:3] %}
-**{{ c.id }}** ({{ c.direction }}, weight {{ c.weight }}; judges: strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}, spread {{ c.judge.spread }}): {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+**{{ c.id }}** ({{ c.direction }}, weight {{ c.weight }}; {{ c.judge.path }} panel: strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}, spread {{ c.judge.spread }}): {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
 {% for r in c.refutations %}
 - refuted by {{ r.by }}: {{ r.reason }} — {% for e in r.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
 {% endfor %}{% if c.conceded_by %}
@@ -45,7 +45,7 @@ None: no claim was refuted and the judges agreed on every claim.
 
 ## Consensus claims
 
-{% for c in verdict.consensus_claims %}- ({{ c.direction }}, strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}) {{ c.text }} — `{{ c.id }}`{% if c.conceded_by %}, conceded by {{ c.conceded_by|join(", ") }}{% endif %}
+{% for c in verdict.consensus_claims %}- ({{ c.direction }}, strength {{ "%.1f"|format(c.judge.evidence_strength) }}, materiality {{ "%.1f"|format(c.judge.materiality) }}, {{ c.judge.path }} panel) {{ c.text }} — `{{ c.id }}`{% if c.conceded_by %}, conceded by {{ c.conceded_by|join(", ") }}{% endif %}
 {% else %}None met the bar (strength ≥ 3, materiality ≥ 3, unrefuted).
 {% endfor %}
 
