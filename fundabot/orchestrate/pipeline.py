@@ -206,15 +206,18 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
 
     from fundabot.agents.runner import load_analyses
 
-    before = {(a["persona"], a["provider"], a["model"]) for a in load_analyses(conn, sid)}
-    with _stage(ticker, "grid"):
-        analyses = await run_grid(conn, sid, personas, adapters, embedder)
-    if {(a["persona"], a["provider"], a["model"]) for a in analyses} - before:
-        # new cells joined the pool: cached rebuttals and judgements never saw their claims
-        with conn.cursor() as cur:
-            for table in ("rebuttals", "judgements", "verdicts"):
-                cur.execute(f"DELETE FROM {table} WHERE snapshot_id = %s", (sid,))
-        conn.commit()
+    if snapshot_id is not None:  # re-judge only: the stored grid as it is, failed cells and all, so nothing invalidates the stored rounds
+        analyses = load_analyses(conn, sid)
+    else:
+        before = {(a["persona"], a["provider"], a["model"]) for a in load_analyses(conn, sid)}
+        with _stage(ticker, "grid"):
+            analyses = await run_grid(conn, sid, personas, adapters, embedder)
+        if {(a["persona"], a["provider"], a["model"]) for a in analyses} - before:
+            # new cells joined the pool: cached rebuttals and judgements never saw their claims
+            with conn.cursor() as cur:
+                for table in ("rebuttals", "judgements", "verdicts"):
+                    cur.execute(f"DELETE FROM {table} WHERE snapshot_id = %s", (sid,))
+            conn.commit()
     metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
     chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
     accessions = s["accessions"]
@@ -252,6 +255,9 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
         if not strong:
             raise RuntimeError(f"{ticker}: no judge succeeded; no verdict produced")
     means = judge.merge_panels(screen_means, judge.mean_scores(strong, escalated), escalated)
+    fallback_ids = sorted(k for k, v in means.items() if v.get("fallback"))
+    if fallback_ids:
+        log.warning("%s: %d claims escalated but unscored by every strong judge; the screen panel's scores stand: %s", ticker, len(fallback_ids), fallback_ids[:8])
     passthrough = {k: v for k, v in means.items() if v["path"] == "screen"}
     implied = [scoring.implied_from_means(judged, {**passthrough, **{c["claim_id"]: {"evidence_strength": float(c["evidence_strength"])} for c in j["output"]["claims"]}}, revised)
                for j in strong]
@@ -266,7 +272,7 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     verdict["providers"] = [a.provider for a in adapters]
     verdict["judges"] = [{"provider": j["provider"], "model": j["model"]} for j in reconciled]
     verdict["screen_judges"] = [{"provider": j["provider"], "model": j["model"]} for j in round1]
-    verdict["escalated_ids"], verdict["n_claims"] = escalated, len(judged)
+    verdict["escalated_ids"], verdict["n_claims"], verdict["fallback_ids"] = escalated, len(judged), fallback_ids
     with conn.cursor() as cur:
         cur.execute("INSERT INTO verdicts (snapshot_id, run_kind, verdict) VALUES (%s, %s, %s) ON CONFLICT (snapshot_id, run_kind) DO UPDATE SET verdict = EXCLUDED.verdict, created_at = now()",
                     (sid, run_kind, Jsonb(verdict)))

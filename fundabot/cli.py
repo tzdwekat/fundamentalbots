@@ -210,7 +210,7 @@ def judge_ab_table(old: dict, new: dict) -> str:
 
 
 @app.command("judge-ab")
-def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judges: int = 3, out_dir: str = "reports", profile: str = "multi"):
+def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "reports", profile: str = "multi"):
     """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""
     import asyncio
     from pathlib import Path
@@ -234,7 +234,7 @@ def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judg
     else:  # the previous pipeline's round-2 rows (no _escalated marker) are about to be overwritten: keep their per-claim means
         rows = [j for j in judge.load_judgements(conn, sid, 2) if "_escalated" not in j["output"]]
         baseline = judge.mean_scores(rows, sorted({c["claim_id"] for j in rows for c in j["output"]["claims"]}))
-    adapters, screen_judges, judge_adapters, _ = build_adapters(True, providers, None, judges, profile=profile)
+    adapters, screen_judges, judge_adapters, _ = build_adapters(True, "", None, judges, profile=profile)
     asyncio.run(analyze_full(conn, ticker, PERSONAS_ALL, adapters, screen_judges, judge_adapters, OpenAIEmbedder(), out_dir=Path(out_dir), run_kind="triage", snapshot_id=sid))
     with conn.cursor() as cur:
         cur.execute("UPDATE verdicts SET verdict = verdict || %s WHERE snapshot_id = %s AND run_kind = 'triage' RETURNING verdict", (Jsonb({"baseline_claim_means": baseline}), sid))
@@ -267,9 +267,7 @@ def build_adapters(full: bool, providers: str, model: str | None, judges: int, t
     persona_models = dict(prof["screen"] if tier == "screen" else prof["personas"])
     if model and "anthropic" in persona_models and tier != "screen":
         persona_models["anthropic"] = model
-    wanted = [p.strip() for p in providers.split(",") if p.strip()]
-    if full and wanted == ["anthropic"]:  # the historical default: --full means every provider the profile has
-        wanted = list(persona_models)
+    wanted = [p.strip() for p in providers.split(",") if p.strip()] or (list(persona_models) if full else list(persona_models)[:1])  # "" = the profile's
     unknown = [p for p in wanted if p not in persona_models]
     if unknown:
         raise typer.BadParameter(f"profile {profile!r} has no persona provider {unknown}; it has {list(persona_models)}")
@@ -290,7 +288,7 @@ def build_adapters(full: bool, providers: str, model: str | None, judges: int, t
 
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
-            providers: str = "anthropic", full: bool = False, judges: int = 3, tier: str = "default", profile: str = "multi",
+            providers: str = "", full: bool = False, judges: int = 3, tier: str = "default", profile: str = "multi",
             open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
     """Run the persona agents over a fresh snapshot and write a report. --full: 3 providers, rebuttal round, judges, verdict."""
     import asyncio
@@ -349,7 +347,7 @@ def watch_list():
         typer.echo(f"{e['ticker']:<8} cik {e['cik']:<10} added {e['added_at']:%Y-%m-%d}  last poll {e['last_poll'] or '-'}  {e['note'] or ''}")
 
 
-def scan_runner(full: bool, providers: str = "anthropic", model: str | None = None, judges: int = 3, tier: str = "default", profile: str = "multi"):
+def scan_runner(full: bool, providers: str = "", model: str | None = None, judges: int = 3, tier: str = "default", profile: str = "multi"):
     """A runner that opens its own DB connection per ticker (connections are not safe to share across concurrent tickers)."""
     import json
     from pathlib import Path
@@ -381,7 +379,7 @@ PERSONAS_ALL = ["bull", "bear", "skeptic", "quality", "macro"]
 
 @app.command()
 def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str = "", full: bool = False, max_usd: float = 100.0,
-         providers: str = "anthropic", concurrency: int = 3, tier: str = "default", profile: str = "multi"):
+         providers: str = "", concurrency: int = 3, tier: str = "default", profile: str = "multi"):
     """Analyze many tickers (cheap run by default, --full for the debate), stalest first, under a per-scan budget."""
     import asyncio
 
@@ -421,7 +419,7 @@ def poll(dry_run: bool = False):
 
 
 @app.command()
-def worker(limit: int = 1, providers: str = "anthropic,openai,gemini", tier: str = "default", profile: str = "multi"):
+def worker(limit: int = 1, providers: str = "", tier: str = "default", profile: str = "multi"):
     """Run queued full analyses whose wait has elapsed."""
     import asyncio
 

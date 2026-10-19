@@ -53,7 +53,8 @@ opinions.
    $0.70 A/B into a full run). Before the strong panel overwrites the old round-2 rows, `judge-ab` copies their per-claim
    means into the triage verdict as `baseline_claim_means`; a re-run reads the baseline from the stored triage verdict.
    The decision rule: ship when the triage `composite_score` (veto-capped, as reported) is within 1.5 points of the
-   previous one on AAPL, NVDA and HALO, and no claim with materiality ≥ 4 moved between consensus and contested;
+   previous one on AAPL, NVDA and HALO, and no pass-through (screen-path) claim with materiality ≥ 4 moved between
+   consensus and contested (a reclassification of an escalated claim is the strong panel's own call and does not count);
    otherwise lower `ESCALATE_MATERIALITY` to 3 and re-run. (The stored `dispersion` is pstdev/10 on the −10..10 scale,
    so "within dispersion" was ambiguous; 1.5 points is about half a persona standard deviation on the runs so far.)
 9. **Cost visibility.** `fundabot cost` rows stay `judge:r1` and `judge:r2`; the README records the measured judge cost

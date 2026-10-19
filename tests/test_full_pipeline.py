@@ -163,3 +163,41 @@ async def test_verdict_report_has_heatmap(fixture_prepare, fmp_fixture, tmp_path
     html = await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, [screen_fake("anthropic")], judges, FakeEmbedder(), out_dir=tmp_path)
     text = html.read_text()
     assert 'class="cell"' in text and text.count('class="cell"') == 10 and "<svg" in text
+
+
+@pytest.mark.db
+async def test_snapshot_id_never_touches_the_grid(fixture_prepare, fmp_fixture, tmp_path):
+    """judge-ab must not retry failed persona cells: a retried cell would invalidate rebuttals and the stored full verdict."""
+    conn = fixture_prepare
+    personas, screen, judges = [persona_fake("anthropic")], [screen_fake("anthropic")], [rebuttal_or_judge("anthropic")]
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas, screen, judges, FakeEmbedder(), out_dir=tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("SELECT snapshot_id, verdict FROM verdicts WHERE run_kind = 'full'"); sid, full = cur.fetchone()
+        cur.execute("INSERT INTO analyses (snapshot_id, persona, provider, model, output, chunk_ids, status, error) VALUES (%s, 'bull', 'openai', 'openai-persona', '{}', '[]', 'failed', 'x')", (sid,))
+    conn.commit()
+    openai_persona = persona_fake("openai")
+    n = calls(personas) + calls(screen) + calls(judges)
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, personas + [openai_persona], screen, judges, FakeEmbedder(), out_dir=tmp_path, run_kind="triage", snapshot_id=sid)
+    assert openai_persona.calls == 0 and calls(personas) + calls(screen) + calls(judges) == n
+    with conn.cursor() as cur:
+        cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,))
+        assert cur.fetchone()[0] == full
+        cur.execute("SELECT count(*) FROM rebuttals WHERE snapshot_id = %s", (sid,)); assert cur.fetchone()[0] == 5
+
+
+@pytest.mark.db
+async def test_unscored_escalated_claims_are_reported(fixture_prepare, fmp_fixture, tmp_path, caplog):
+    conn = fixture_prepare
+    strong = rebuttal_or_judge("anthropic")
+    inner = strong.outputs
+
+    def out(system, user):
+        o = inner(system, user)
+        o["claims"] = o["claims"][1:]  # forgets the first escalated claim
+        return o
+    strong.outputs = out
+    await pipeline.analyze_full(conn, "AAPL", PERSONAS, [persona_fake("anthropic")], [screen_fake("anthropic")], [strong], FakeEmbedder(), out_dir=tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("SELECT verdict FROM verdicts WHERE run_kind = 'full'"); v = cur.fetchone()[0]
+    assert len(v["fallback_ids"]) == 1 and v["fallback_ids"][0] in v["escalated_ids"]
+    assert any("escalated but unscored" in r.message for r in caplog.records)

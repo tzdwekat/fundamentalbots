@@ -63,7 +63,8 @@ supplies the sub-scores, catalysts and summary. Every claim in the verdict says 
 merge are code, not model output. `fundabot judge-ab T` re-judges a stored snapshot this way and prints the before/after
 (composite, sub-scores, escalation count, reclassified claims, pass-through deltas) with a ship/widen line.
 
-Measured on 2026-10-19 against the stored verdicts: composites unchanged on AAPL (1.9), NVDA (3.2) and HALO (1.9);
+Measured on 2026-10-19 against the stored verdicts: composites unchanged on AAPL (1.9), NVDA (3.2) and HALO (1.9; its
+strong panel ran on OpenAI and Gemini only because the Anthropic account was out of credits);
 79%, 69% and 66% of claims escalated (cheap judges call most claims material); judge cost $1.17 / $1.28 per run
 against $1.75 before (screen panel $0.17-0.20, strong panel $1.0). Tighter rules were simulated on the same screen
 outputs: requiring two screen judges at materiality 4 escalates 50-62% but lets one strong-panel dispute per ticker pass
@@ -73,7 +74,8 @@ rule stays "any screen judge at 4" (`judge.ESCALATE_MATERIALITY`); the larger sa
 
 Provider profiles (2026-10-19): `fundabot/profiles.yaml` maps each role (personas and their rebuttals, screen judge
 panel, escalation judge panel, guidance extraction) to provider and model; `--profile` picks one at run time and the
-pipeline is otherwise identical. `multi` is the three-provider layout above. `anthropic`, `openai` and `gemini` run the
+pipeline is otherwise identical. `multi` is the three-provider layout above. `--providers` defaults to the profile's providers
+(all of them on `--full`, the first one on a cheap run). `anthropic`, `openai` and `gemini` run the
 whole debate on one provider: five persona cells, rebuttals on the same models, one screen judge and one escalation
 judge. Add a profile by adding a key to the file; every role is required. Embeddings stay on OpenAI. Measured on 2026-10-19:
 `analyze MSFT --full --profile openai` cost $0.78 and took 2 minutes 18 seconds (personas $0.36, rebuttals $0.25, screen

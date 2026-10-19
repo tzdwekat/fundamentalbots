@@ -1,6 +1,6 @@
 # {{ ticker }} verdict
 
-snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · providers {{ verdict.providers|join(", ") }} · screen panel {% for j in verdict.screen_judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% else %}none{% endfor %} · escalation panel {% for j in verdict.judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% endfor %} · {{ verdict.escalated_ids|length }} of {{ verdict.n_claims }} claims escalated
+snapshot `{{ snapshot.id }}` · price date {{ snapshot.price_date }} · close {{ snapshot.latest_close }} · providers {{ verdict.providers|join(", ") }} · screen panel {% for j in verdict.screen_judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% else %}none{% endfor %} · escalation panel {% for j in verdict.judges %}{{ j.provider }}/{{ j.model }}{{ ", " if not loop.last }}{% endfor %} · {{ verdict.escalated_ids|length }} of {{ verdict.n_claims }} claims escalated{% if verdict.fallback_ids %} · ⚠ {{ verdict.fallback_ids|length }} escalated claims unscored by the strong panel (screen scores stand){% endif %}
 
 ## Summary (median judge: {{ verdict.median_judge }})
 
