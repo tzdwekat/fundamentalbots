@@ -196,8 +196,8 @@ def judge_ab_table(old: dict, new: dict) -> str:
     for cid in sorted(set(before) & set(after)):
         if before[cid][0] != after[cid][0]:
             mat = max(before[cid][1]["judge"]["materiality"], after[cid][1]["judge"]["materiality"])
-            moved.append((cid, f"{before[cid][0]}->{after[cid][0]}", mat))
-    lines += [f"reclassified: {cid} {how} (materiality {mat:.0f})" for cid, how, mat in moved] or ["reclassified: none"]
+            moved.append((cid, f"{before[cid][0]}->{after[cid][0]}", mat, after[cid][1]["judge"].get("path", "screen")))
+    lines += [f"reclassified: {cid} {how} (materiality {mat:.0f}{', escalated' if path == 'escalated' else ''})" for cid, how, mat, path in moved] or ["reclassified: none"]
     baseline = new.get("baseline_claim_means") or {}
     deltas = sorted(((abs(c["judge"]["evidence_strength"] - baseline[cid]["evidence_strength"]), cid, c["judge"]["evidence_strength"], baseline[cid]["evidence_strength"])
                      for cid, (_, c) in after.items() if c["judge"].get("path") == "screen" and cid in baseline), reverse=True)[:10]
@@ -205,7 +205,7 @@ def judge_ab_table(old: dict, new: dict) -> str:
     reasons = []
     if abs(new["composite_score"] - old["composite_score"]) > AB_BAND:
         reasons.append(f"composite moved more than {AB_BAND}")
-    reasons += [f"{cid} moved {how} at materiality {mat:.0f}" for cid, how, mat in moved if mat >= 4]
+    reasons += [f"{cid} moved {how} at materiality {mat:.0f}" for cid, how, mat, path in moved if mat >= 4 and path == "screen"]  # the strong panel's own splits are its call
     lines.append("verdict: ship" if not reasons else "verdict: widen (" + "; ".join(reasons) + ")")
     return "\n".join(lines)
 

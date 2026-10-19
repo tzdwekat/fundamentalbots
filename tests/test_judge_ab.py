@@ -28,6 +28,9 @@ def test_judge_ab_table_rule():
     assert "verdict: widen" in moved and "b consensus->contested (materiality 4)" in moved
     minor_move = judge_ab_table(old, verdict(2.4, consensus=[("b", 4)], contested=[("a", 3), ("c", 5, "escalated")]))
     assert minor_move.strip().endswith("verdict: ship") and "a consensus->contested (materiality 3)" in minor_move
+    # a claim the strong panel judged and split on is the strong panel's call, not a pass-through failure
+    strong_move = judge_ab_table(old, verdict(2.4, consensus=[("a", 3)], contested=[("b", 4, "escalated"), ("c", 5, "escalated")]))
+    assert strong_move.strip().endswith("verdict: ship") and "b consensus->contested (materiality 4, escalated)" in strong_move
 
 
 @pytest.mark.db

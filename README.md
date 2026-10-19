@@ -62,6 +62,14 @@ supplies the sub-scores, catalysts and summary. Every claim in the verdict says 
 merge are code, not model output. `fundabot judge-ab T` re-judges a stored snapshot this way and prints the before/after
 (composite, sub-scores, escalation count, reclassified claims, pass-through deltas) with a ship/widen line.
 
+Measured on 2026-10-19 against the stored verdicts: composites unchanged on AAPL (1.9), NVDA (3.2) and HALO (1.9);
+79%, 69% and 66% of claims escalated (cheap judges call most claims material); judge cost $1.17 / $1.28 per run
+against $1.75 before (screen panel $0.17-0.20, strong panel $1.0). Tighter rules were simulated on the same screen
+outputs: requiring two screen judges at materiality 4 escalates 50-62% but lets one strong-panel dispute per ticker pass
+through on HALO; a mean of 4 escalates 36-40% but passes 10-12 claims the previous strong panel had rated material. The
+rule stays "any screen judge at 4" (`judge.ESCALATE_MATERIALITY`); the larger saving comes from running one provider
+(see profiles below).
+
 How the persona prompt got cheaper (Phase 5a): the metrics table is pruned to what the report shows (about 13k tokens instead
 of 25k, raw XBRL items at fiscal-year columns only); boilerplate excerpts that repeat across filings are kept once (newest
 filing wins); retrieval is split into a shared set from the base queries (12k tokens, identical for every persona) and a
