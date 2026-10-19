@@ -1,0 +1,46 @@
+{% extends "base.html.j2" %}
+{% block title %}Overview · fundabot{% endblock %}
+{% block body %}
+<h1>Watchlist</h1>
+<form method="post" action="/watchlist" class="inline">
+  <input name="ticker" placeholder="ticker" required pattern="[A-Za-z.\-]{1,6}"> <button name="action" value="add">Add</button>
+</form>
+<form class="inline" id="profile-form">
+  <label>profile <select name="profile" id="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+</form>
+<table class="list">
+<thead><tr><th>ticker</th><th>close</th><th>1m</th><th>3m</th><th>6m</th><th>outlook</th><th>composite</th><th>verdict</th><th>queue</th><th>analyze</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr>
+  <td><a href="/t/{{ r.ticker }}">{{ r.ticker }}</a></td>
+  <td>{{ r.close|num }}</td><td>{{ r.ret_1m|pct }}</td><td>{{ r.ret_3m|pct }}</td><td>{{ r.ret_6m|pct }}</td>
+  <td><span class="label">{{ r.outlook }}</span></td>
+  <td>{{ r.composite if r.composite is not none else "—" }}</td>
+  <td>{{ r.verdict_date or "—" }}</td>
+  <td>{{ r.queue_status or "" }}{% for jid, j in running.items() if j.ticker == r.ticker %} <span class="running">{{ j.kind }} running</span>{% endfor %}</td>
+  <td class="jobs">
+    {% for kind in ("cheap", "full") %}
+    <form hx-post="/jobs" hx-target="#job-{{ r.ticker }}" hx-swap="innerHTML" class="inline">
+      <input type="hidden" name="ticker" value="{{ r.ticker }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="profile" value="multi" class="profile-field">
+      <button class="small">Analyze {{ kind }} <span class="est">~${{ "%.2f"|format(estimates("multi")[kind]) }}</span></button>
+    </form>
+    {% endfor %}
+    <form method="post" action="/watchlist" class="inline"><input type="hidden" name="ticker" value="{{ r.ticker }}"><button name="action" value="remove" class="small muted">remove</button></form>
+    <div id="job-{{ r.ticker }}"></div>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="10">No tickers yet. Add one above.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<p class="muted">Estimates are measured costs per profile (fundabot/profiles.yaml). Change the profile with the selector; the buttons send it.</p>
+<script>
+document.getElementById('profile').addEventListener('change', e => {
+  document.querySelectorAll('.profile-field').forEach(f => f.value = e.target.value);
+  const est = {{ all_estimates|tojson }};
+  document.querySelectorAll('.jobs form').forEach(f => { const k = f.querySelector('[name=kind]'); if (k) f.querySelector('.est').textContent = '~$' + est[e.target.value][k.value].toFixed(2); });
+});
+</script>
+{% endblock %}

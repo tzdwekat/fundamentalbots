@@ -1,0 +1,4 @@
+<ul class="news">
+{% for n in news %}<li><span class="muted">{{ n.published.strftime("%Y-%m-%d %H:%M") }} · {{ n.publisher or n.site }}{% if n.kind == "press" %} · press release{% endif %}</span><br><a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>{% if n.text %}<p class="snippet">{{ n.text[:240] }}{{ "…" if n.text|length > 240 }}</p>{% endif %}</li>
+{% else %}<li class="muted">No stored news in the last {{ news_days }} days.</li>{% endfor %}
+</ul>

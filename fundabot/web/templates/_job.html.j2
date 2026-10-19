@@ -1,0 +1,5 @@
+<div class="job {{ job.status }}" {% if job.status == "running" %}hx-get="/jobs/{{ job.id }}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+  job {{ job.id }} · {{ job.kind }} {{ job.ticker }} on {{ job.profile }} · <strong>{{ job.status }}</strong>
+  {% if job.status == "done" %}· ${{ "%.2f"|format(job.cost_usd or 0) }}{% if job.report_url %} · <a href="{{ job.report_url }}">report</a>{% endif %} · <a href="/t/{{ job.ticker }}">reload page</a>{% endif %}
+  {% if job.error %}<span class="warn">{{ job.error }}</span>{% endif %}
+</div>

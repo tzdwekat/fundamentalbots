@@ -63,3 +63,9 @@ def test_empty_providers_means_the_profile(monkeypatch):
     assert [a.provider for a in named] == ["anthropic"]  # an explicit --providers is honoured as written
     with pytest.raises(Exception, match="no persona provider"):
         build_adapters(True, "anthropic", None, 3, profile="openai")
+
+
+def test_estimates_per_profile():
+    for n in profiles.names():
+        est = profiles.estimates(n)
+        assert set(est) == {"cheap", "full"} and 0 < est["cheap"] < est["full"]

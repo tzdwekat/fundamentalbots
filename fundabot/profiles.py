@@ -25,3 +25,12 @@ def load(name: str) -> dict:
     if missing:
         raise ValueError(f"profile {name!r} lacks roles: {missing}")
     return {r: dict(p[r]) for r in ROLES}
+
+
+def estimates(name: str) -> dict:
+    """{"cheap": usd, "full": usd} shown on every Analyze button before any spend."""
+    p = _all()
+    if name not in p:
+        raise KeyError(f"unknown profile {name!r}; choose one of {', '.join(p)}")
+    est = p[name].get("estimate_usd") or {}
+    return {"cheap": float(est.get("cheap", 0)), "full": float(est.get("full", 0))}

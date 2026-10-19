@@ -1,0 +1,14 @@
+{% if error %}<p class="warn">{{ error }}</p>{% endif %}
+{% if narrative %}
+<p class="one-line"><strong>{{ narrative.one_line }}</strong>{% if narrative_stale %} <span class="pill stale">new events since this was written</span>{% endif %}</p>
+<ol class="narrative">
+{% for s in narrative.sentences %}<li>{{ s.text }} <span class="ev-list">{% for e in s.evidence %}<a class="ev" hx-get="/evidence/{{ metrics_snapshot_id or '-' }}/{{ e|urlencode }}" hx-target="#drawer">{{ e }}</a> {% endfor %}</span></li>{% endfor %}
+</ol>
+{% if narrative_dropped %}<p class="muted">{{ narrative_dropped }} sentence(s) dropped: their numbers or citations did not check out.</p>{% endif %}
+<p class="muted">Written {{ narrative.asof }} from the stats, moves, news and excerpts above; every number was checked against them.</p>
+{% else %}<p class="muted">No narrative for this window yet.</p>{% endif %}
+<form hx-post="/t/{{ ticker }}/narrative" hx-target="#narrative" class="inline">
+  <input type="hidden" name="window" value="{{ window_days }}">
+  <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select>
+  <button class="small">{{ "Explain moves again" if narrative else "Explain moves" }} <span class="est">~${{ "%.2f"|format(narrative_estimate) }}</span></button>
+</form>

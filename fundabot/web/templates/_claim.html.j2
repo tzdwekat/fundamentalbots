@@ -1,0 +1,6 @@
+<div class="claim {{ cl.direction }}">
+  <p>{{ cl.text }} <span class="muted">· {{ cl.agent }}{% if cl.judge %} · strength {{ "%.1f"|format(cl.judge.evidence_strength) }} · materiality {{ "%.1f"|format(cl.judge.materiality) }} · {{ cl.judge.path }} panel{% else %} · weight {{ cl.weight }}{% endif %}</span></p>
+  <p class="ev-list">{% for e in cl.evidence %}<a class="ev" hx-get="/evidence/{{ panel.snapshot_id }}/{{ e|urlencode }}" hx-target="#drawer">{{ e }}</a> {% endfor %}</p>
+  {% for r in cl.refutations or [] %}<p class="refute">refuted by {{ r.by }}: {{ r.reason }}</p>{% endfor %}
+  {% if cl.conceded_by %}<p class="muted">conceded by {{ cl.conceded_by|join(", ") }}</p>{% endif %}
+</div>

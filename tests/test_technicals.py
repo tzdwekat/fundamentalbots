@@ -98,3 +98,11 @@ def test_events_for_merges_sources(db_conn):
     events = T.events_for(db_conn, cik, "AAPL", date(2026, 6, 1), date(2026, 8, 31), list_filings=lambda c: filings)
     assert sorted(e.id for e in events) == ["earnings:2026-07-30", "filing:0000320193-26-000077", "news:n1", "split:2026-06-10", "transcript:T2026Q3"]
     assert next(e for e in events if e.kind == "earnings").title == "EPS 1.57 vs 1.43" and next(e for e in events if e.kind == "news").url == "http://r/1"
+
+
+@pytest.mark.db
+def test_events_include_grade_changes_only(db_conn):
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO grades (cik, date, company, previous_grade, new_grade, action) VALUES (1, '2026-07-02', 'JP Morgan', 'Neutral', 'Overweight', 'upgrade'), (1, '2026-07-03', 'Needham', 'Hold', 'Hold', 'maintain')")
+    events = T.events_for(db_conn, 1, "X", date(2026, 7, 1), date(2026, 7, 31), list_filings=lambda c: pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"]))
+    assert [e.id for e in events] == ["grade:2026-07-02:JP Morgan"] and events[0].title == "JP Morgan: Neutral -> Overweight (upgrade)"

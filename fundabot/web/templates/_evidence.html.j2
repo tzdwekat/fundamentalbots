@@ -1,0 +1,8 @@
+<div class="drawer-box">
+  <a class="close" onclick="this.parentElement.remove()">×</a>
+  <h4><code>{{ e.id }}</code></h4>
+  {% if e.kind == "news" %}<p class="muted">{{ e.published }} · {{ e.publisher }}</p><p><a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a></p><p>{{ e.text }}</p>
+  {% elif e.kind == "filing" %}<p>{{ e.text }} · <a href="{{ e.url }}" target="_blank" rel="noopener">open on EDGAR</a></p>
+  {% elif e.kind == "chunk" %}<p class="muted">{{ e.accession }} · {{ e.item }}</p><p class="excerpt">{{ e.text }}</p>
+  {% else %}<p><code>{{ e.text }}</code></p>{% endif %}
+</div>

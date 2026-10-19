@@ -116,6 +116,9 @@ def events_for(conn: psycopg.Connection, cik: int, ticker: str, start: date, end
         cur.execute("SELECT id, published, title, url FROM news WHERE cik = %s AND published::date BETWEEN %s AND %s", (cik, start, end))
         for nid, published, title, url in cur.fetchall():
             events.append(Event(published.date(), "news", f"news:{nid}", title, url))
+        cur.execute("SELECT date, company, previous_grade, new_grade, action FROM grades WHERE cik = %s AND date BETWEEN %s AND %s AND action IN ('upgrade', 'downgrade')", (cik, start, end))
+        for d, company, prev, new, action in cur.fetchall():
+            events.append(Event(d, "grade", f"grade:{d}:{company}", f"{company}: {prev} -> {new} ({action})"))
     return sorted(events, key=lambda e: (e.date, e.id))
 
 

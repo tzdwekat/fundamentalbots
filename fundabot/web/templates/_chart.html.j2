@@ -1,0 +1,6 @@
+{% if chart_svg %}<div class="viz-root">{{ chart_svg|safe }}</div>
+<details><summary>Largest moves in the window</summary>
+<table class="list"><thead><tr><th>day</th><th>move</th><th>close</th><th>nearby events</th></tr></thead><tbody>
+{% for m in moves %}<tr><td><code>{{ m.id }}</code></td><td>{{ m.ret|pct }}</td><td>{{ m.close|num }}</td><td>{% for e in m.events %}<span class="pill {{ e.kind }}">{% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</span> {% else %}<span class="muted">no event within two trading days</span>{% endfor %}</td></tr>{% endfor %}
+</tbody></table></details>
+{% else %}<p class="muted">No prices to chart.</p>{% endif %}

@@ -1,0 +1,13 @@
+{% extends "base.html.j2" %}
+{% block title %}Calibration · fundabot{% endblock %}
+{% block body %}
+<h1>Calibration</h1>
+<p class="muted">Statistics appear once at least 10 verdicts are older than the horizon (<code>fundabot calibrate</code>).</p>
+<table class="list"><thead><tr><th>run</th><th>horizon</th><th>n</th><th>stats</th></tr></thead><tbody>
+{% for r in runs %}<tr><td>{{ r.run_at.strftime("%Y-%m-%d") }}</td><td>{{ r.horizon_days }}d</td><td>{{ r.n }}</td><td><code>{{ r.stats }}</code></td></tr>{% else %}<tr><td colspan="4" class="muted">no calibration runs yet</td></tr>{% endfor %}
+</tbody></table>
+<h2>Outcomes</h2>
+<table class="list"><thead><tr><th>ticker</th><th>horizon</th><th>t0</th><th>t1</th><th>composite</th><th>return</th><th>S&amp;P</th><th>excess</th></tr></thead><tbody>
+{% for o in outcomes %}<tr><td>{{ o.ticker }}</td><td>{{ o.horizon_days }}d</td><td>{{ o.t0 }}</td><td>{{ o.t1 }}</td><td>{{ o.composite }}</td><td>{{ o.ticker_return|pct }}</td><td>{{ o.spy_return|pct }}</td><td>{{ o.excess_return|pct }}</td></tr>{% else %}<tr><td colspan="8" class="muted">none yet</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}

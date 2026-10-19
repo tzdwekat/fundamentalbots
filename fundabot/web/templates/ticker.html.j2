@@ -1,0 +1,81 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ ticker }} · fundabot{% endblock %}
+{% block body %}
+<header class="ticker-head">
+  <h1>{{ ticker }}</h1>
+  {% if stats and stats.close %}
+  <div class="stats">
+    <span class="big">{{ stats.close|num }}</span> <span class="muted">close {{ stats.asof }}</span>
+    <span>1m {{ stats.ret_1m|pct }}</span><span>3m {{ stats.ret_3m|pct }}</span><span>6m {{ stats.ret_6m|pct }}</span><span>12m {{ stats.ret_12m|pct }}</span>
+    {% if stats.excess_3m is defined and stats.excess_3m is not none %}<span class="muted">vs S&amp;P 3m {{ stats.excess_3m|pct }}</span>{% endif %}
+    <span class="muted">52w high {{ stats.drawdown_52w|pct }} · low +{{ (stats.dist_52w_low or 0)|pct }}</span>
+  </div>
+  {% else %}<p class="muted">No stored prices yet.</p>{% endif %}
+  <div class="actions">
+    {% if next_earnings %}<span class="pill">Next earnings {{ next_earnings }}</span>{% endif %}
+    {% if running %}<span class="running">job running</span>{% endif %}
+    <form hx-post="/jobs" hx-target="#job" class="inline"><input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="refresh"><input type="hidden" name="profile" value="multi"><button class="small">Refresh data (free)</button></form>
+    <form hx-post="/jobs" hx-target="#job" class="inline">
+      <input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="cheap">
+      <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }} ~${{ "%.2f"|format(estimates(p).cheap) }}</option>{% endfor %}</select>
+      <button class="small">Analyze cheap</button>
+    </form>
+    <form hx-post="/jobs" hx-target="#job" class="inline">
+      <input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="full">
+      <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }} ~${{ "%.2f"|format(estimates(p).full) }}</option>{% endfor %}</select>
+      <button class="small">Analyze full</button>
+    </form>
+    <div id="job"></div>
+  </div>
+</header>
+
+<section class="grid2">
+<div>
+  <div class="tabs">{% for w in windows %}<a class="{{ 'on' if w == window_days }}" href="/t/{{ ticker }}?window={{ w }}&news={{ news_days }}">{{ w }}d</a>{% endfor %}</div>
+  <div id="chart">{% include "_chart.html.j2" %}</div>
+  <h2>What moved it <span class="muted">({{ window_days }} days)</span></h2>
+  <div id="narrative">{% include "_narrative.html.j2" %}</div>
+</div>
+<div>
+  <h2>Outlook <span class="label big-label">{{ outlook.label }}</span></h2>
+  <p class="muted rule">{{ outlook.rule }}</p>
+  {% set c = outlook.components %}
+  {% if c %}
+  <table class="kv">
+    <tr><th>momentum</th><td>{{ c.momentum.direction or "n/a" }} · revenue yoy {% for v in c.momentum.revenue_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}· EPS yoy {% for v in c.momentum.eps_diluted_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}{% if c.momentum.eps_beat_streak is not none %}· beat streak {{ c.momentum.eps_beat_streak|int }}{% endif %}{% if c.momentum.eps_estimate_revision_90d is not none %}· est. revision 90d {{ c.momentum.eps_estimate_revision_90d|pct }}{% endif %}</td></tr>
+    <tr><th>valuation</th><td>{{ c.valuation.state or "n/a" }} · P/E 5y pct {{ c.valuation.pe_5y_percentile|pct(0) if c.valuation.pe_5y_percentile is not none else "n/a" }} · EV/sales 5y pct {{ c.valuation.ev_sales_5y_percentile|pct(0) if c.valuation.ev_sales_5y_percentile is not none else "n/a" }}</td></tr>
+    <tr><th>trend</th><td>{{ c.trend.state or "n/a" }} · 50d {{ c.trend.ma50|num }} ({{ "above" if c.trend.above_ma50 else "below" }}) · 200d {{ c.trend.ma200|num }} ({{ "above" if c.trend.above_ma200 else "below" }}) · 50d slope {{ c.trend.ma50_slope_20d|pct }} · off 52w high {{ c.trend.drawdown_52w|pct }}</td></tr>
+  </table>
+  {% endif %}
+  {% if ownership %}<h3>Ownership and estimates</h3><ul class="plain">{% for line in ownership %}<li><code>{{ line }}</code></li>{% endfor %}</ul>{% endif %}
+
+  <h2>Decision panel</h2>
+  {% if panel %}
+  <p><strong>Composite {{ panel.composite }}</strong>{% if panel.veto_note %} · <span class="warn">{{ panel.veto_note }}</span>{% endif %}
+    {% if panel.kind == "full" %}· judge agreement {{ panel.judge_agreement }} · dispersion {{ panel.dispersion }} · {{ panel.escalated }} of {{ panel.n_claims }} claims escalated · verdict {{ panel.verdict_date }}{% else %}· cheap run, per-persona scores: {% for a, s in panel.scores.items() %}{{ a }} {{ s }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
+    · <a href="{{ panel.report_url }}">full report</a></p>
+  {% if panel.summary %}<blockquote>{{ panel.summary }}</blockquote>{% endif %}
+  {% if panel.subs and panel.subs.quality_score is not none %}<p class="muted">quality {{ panel.subs.quality_score }} · value {{ panel.subs.value_score }} · earnings momentum {{ panel.subs.earnings_momentum_score }} · accounting risk {{ panel.subs.accounting_risk_score }}</p>{% endif %}
+  <div class="grid2 panel">
+    <div><h3>Bull case</h3>
+      {% for cl in panel.bull %}{% include "_claim.html.j2" %}{% else %}<p class="muted">none</p>{% endfor %}
+      {% if panel.contested_bull %}<h4>Contested</h4>{% for cl in panel.contested_bull %}{% include "_claim.html.j2" %}{% endfor %}{% endif %}
+    </div>
+    <div><h3>Bear case</h3>
+      {% for cl in panel.bear %}{% include "_claim.html.j2" %}{% else %}<p class="muted">none</p>{% endfor %}
+    </div>
+  </div>
+  <h3>Red flags</h3>
+  <ul class="plain">{% for f in panel.red_flags %}<li><strong>{{ f.flag_id }}</strong> [{{ f.severity }}] {{ f.detail }}</li>{% else %}<li class="muted">none from the rules engine</li>{% endfor %}</ul>
+  {% if panel.catalysts %}<h3>Catalysts</h3><ul class="plain">{% for c in panel.catalysts %}<li>{{ c.what }} <span class="muted">({{ c.when }})</span> {% for e in c.evidence %}<a class="ev" hx-get="/evidence/{{ panel.snapshot_id }}/{{ e|urlencode }}" hx-target="#drawer">{{ e }}</a> {% endfor %}</li>{% endfor %}</ul>{% endif %}
+  {% else %}
+  <p class="muted">No analysis yet for {{ ticker }}. Use Analyze cheap or Analyze full above.</p>
+  {% endif %}
+</div>
+</section>
+
+<section>
+  <h2>News <span class="tabs small-tabs">{% for n in news_windows %}<a class="{{ 'on' if n == news_days }}" hx-get="/t/{{ ticker }}/news?news={{ n }}" hx-target="#news">{{ n }}d</a>{% endfor %}</span></h2>
+  <div id="news">{% include "_news.html.j2" %}</div>
+</section>
+{% endblock %}

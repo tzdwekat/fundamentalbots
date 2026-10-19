@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}fundabot{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>{{ viz_css }}</style>
+<script src="/static/htmx.min.js"></script>
+</head>
+<body>
+<nav class="top">
+  <a href="/" class="brand">fundabot</a>
+  <a href="/">Overview</a> <a href="/review">Review</a> <a href="/queue">Queue</a> <a href="/calibration">Calibration</a>
+  {% if spend is defined %}<span class="spend">month: ${{ "%.2f"|format(spend) }} of ${{ "%.0f"|format(budget) }} budget</span>{% endif %}
+</nav>
+<main>
+{% block body %}{% endblock %}
+</main>
+<div id="drawer" class="drawer" hx-target="this"></div>
+</body>
+</html>

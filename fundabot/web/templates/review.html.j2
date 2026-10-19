@@ -1,0 +1,13 @@
+{% extends "base.html.j2" %}
+{% block title %}Review · fundabot{% endblock %}
+{% block body %}
+<h1>Review contested verdicts</h1>
+<table class="list"><thead><tr><th>ticker</th><th>verdict</th><th>composite</th><th>dispersion</th><th>agreement</th><th>top contested claim</th><th>label</th></tr></thead><tbody>
+{% for r in rows %}<tr><td><a href="/t/{{ r.ticker }}">{{ r.ticker }}</a></td><td>{{ r.created_at.date() }}</td><td>{{ r.composite }}</td><td>{{ "%.2f"|format(r.dispersion) }}</td><td>{{ "%.2f"|format(r.agreement) }}</td>
+<td>{% if r.top_claim %}{{ r.top_claim.text }} <span class="muted">· {{ r.top_claim.agent }}</span>{% endif %}</td>
+<td>{% if r.top_claim %}<form hx-post="/review" hx-target="this" hx-swap="innerHTML" class="inline"><input type="hidden" name="ticker" value="{{ r.ticker }}"><input type="hidden" name="agent" value="{{ r.top_claim.agent }}"><input name="note" placeholder="note"> <button name="vote" value="up" class="small">up</button> <button name="vote" value="down" class="small">down</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No full verdicts yet.</td></tr>{% endfor %}
+</tbody></table>
+<h2>Labels so far</h2>
+<table class="list"><thead><tr><th>persona</th><th>provider</th><th>up</th><th>down</th></tr></thead><tbody>{% for p, pr, u, d in counts %}<tr><td>{{ p }}</td><td>{{ pr }}</td><td>{{ u }}</td><td>{{ d }}</td></tr>{% else %}<tr><td colspan="4" class="muted">none</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

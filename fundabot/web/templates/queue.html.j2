@@ -1,0 +1,17 @@
+{% extends "base.html.j2" %}
+{% block title %}Queue · fundabot{% endblock %}
+{% block body %}
+<h1>Queue and spend</h1>
+<p><strong>Month to date ${{ "%.2f"|format(spend) }}</strong> of the ${{ "%.0f"|format(budget) }} budget (FUNDABOT_MONTHLY_BUDGET_USD).</p>
+<h2>Running now</h2><ul class="plain">{% for jid, j in running.items() %}<li>job {{ jid }}: {{ j.kind }} {{ j.ticker }}</li>{% else %}<li class="muted">nothing</li>{% endfor %}</ul>
+<h2>Worker queue</h2>
+<table class="list"><thead><tr><th>ticker</th><th>period</th><th>reason</th><th>status</th><th>queued</th><th>not before</th><th>finished</th><th>error</th></tr></thead><tbody>
+{% for q in queue %}<tr><td>{{ q.ticker }}</td><td>{{ q.period_key }}</td><td>{{ q.reason }}</td><td>{{ q.status }}</td><td>{{ q.queued_at.date() if q.queued_at }}</td><td>{{ q.not_before.date() if q.not_before }}</td><td>{{ q.finished_at.date() if q.finished_at }}</td><td class="warn">{{ q.error or "" }}</td></tr>{% else %}<tr><td colspan="8" class="muted">empty</td></tr>{% endfor %}
+</tbody></table>
+<h2>Recent web jobs</h2>
+<table class="list"><thead><tr><th>id</th><th>ticker</th><th>kind</th><th>profile</th><th>status</th><th>started</th><th>cost</th><th>report</th></tr></thead><tbody>
+{% for j in recent %}<tr><td>{{ j.id }}</td><td>{{ j.ticker }}</td><td>{{ j.kind }}</td><td>{{ j.profile }}</td><td>{{ j.status }}{% if j.error %} <span class="warn">{{ j.error[:120] }}</span>{% endif %}</td><td>{{ j.started_at.strftime("%Y-%m-%d %H:%M") if j.started_at }}</td><td>{{ "$%.2f"|format(j.cost_usd) if j.cost_usd is not none else "" }}</td><td>{% if j.report_path %}<a href="/reports/{{ j.report_path.split('/')[-2] }}/{{ j.report_path.split('/')[-1] }}">open</a>{% endif %}</td></tr>{% else %}<tr><td colspan="8" class="muted">none</td></tr>{% endfor %}
+</tbody></table>
+<h2>Spend by day (14 days)</h2>
+<table class="list"><tbody>{% for d, usd in daily %}<tr><td>{{ d }}</td><td>${{ usd }}</td></tr>{% else %}<tr><td class="muted">no calls</td></tr>{% endfor %}</tbody></table>
+{% endblock %}

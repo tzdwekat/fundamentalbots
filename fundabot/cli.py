@@ -209,6 +209,14 @@ def judge_ab_table(old: dict, new: dict) -> str:
     return "\n".join(lines)
 
 
+@app.command()
+def web(host: str = "127.0.0.1", port: int = 8787, reload: bool = False):
+    """Serve the web app (overview, ticker picture, review, queue, calibration) on localhost."""
+    import uvicorn
+
+    uvicorn.run("fundabot.web.app:app", host=host, port=port, reload=reload, log_level="info")
+
+
 @app.command("judge-ab")
 def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "reports", profile: str = "multi"):
     """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""
