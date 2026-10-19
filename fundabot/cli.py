@@ -170,22 +170,102 @@ def cost(ticker: str):
     typer.echo(cost_table(conn, snap["id"]))
 
 
+AB_BAND = 1.5  # composite points: the triage verdict ships when it lands within this of the stored one
+
+
+def latest_with_verdict(conn, ticker: str) -> str | None:
+    """Newest snapshot of the ticker that has a stored `full` verdict (ingest/metrics mint newer snapshots with no grid)."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT s.id FROM snapshots s JOIN verdicts v ON v.snapshot_id = s.id AND v.run_kind = 'full' WHERE s.ticker = %s ORDER BY s.created_at DESC LIMIT 1",
+                    (ticker.upper(),))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def judge_ab_table(old: dict, new: dict) -> str:
+    """Stored verdict vs triage verdict: scores, escalation, reclassified claims, largest pass-through deltas, and the ship/widen rule."""
+    lines = [f"composite  {old['composite_score']} -> {new['composite_score']}  (Δ {new['composite_score'] - old['composite_score']:+.1f})"]
+    for k in ("quality_score", "value_score", "earnings_momentum_score", "accounting_risk_score", "judge_agreement"):
+        lines.append(f"{k}  {old.get(k)} -> {new.get(k)}")
+    lines.append(f"escalated  {len(new.get('escalated_ids', []))} of {new.get('n_claims', 0)}")
+
+    def classes(v):
+        return {**{c["id"]: ("consensus", c) for c in v["consensus_claims"]}, **{c["id"]: ("contested", c) for c in v["contested_claims"]}}
+    before, after = classes(old), classes(new)
+    moved = []
+    for cid in sorted(set(before) & set(after)):
+        if before[cid][0] != after[cid][0]:
+            mat = max(before[cid][1]["judge"]["materiality"], after[cid][1]["judge"]["materiality"])
+            moved.append((cid, f"{before[cid][0]}->{after[cid][0]}", mat))
+    lines += [f"reclassified: {cid} {how} (materiality {mat:.0f})" for cid, how, mat in moved] or ["reclassified: none"]
+    baseline = new.get("baseline_claim_means") or {}
+    deltas = sorted(((abs(c["judge"]["evidence_strength"] - baseline[cid]["evidence_strength"]), cid, c["judge"]["evidence_strength"], baseline[cid]["evidence_strength"])
+                     for cid, (_, c) in after.items() if c["judge"].get("path") == "screen" and cid in baseline), reverse=True)[:10]
+    lines += ["screen-panel strength vs previous strong panel (largest deltas):"] + [f"  {cid}  {new_s:.1f} vs {old_s:.1f} (Δ {d:.1f})" for d, cid, new_s, old_s in deltas] if deltas else ["no baseline claim means"]
+    reasons = []
+    if abs(new["composite_score"] - old["composite_score"]) > AB_BAND:
+        reasons.append(f"composite moved more than {AB_BAND}")
+    reasons += [f"{cid} moved {how} at materiality {mat:.0f}" for cid, how, mat in moved if mat >= 4]
+    lines.append("verdict: ship" if not reasons else "verdict: widen (" + "; ".join(reasons) + ")")
+    return "\n".join(lines)
+
+
+@app.command("judge-ab")
+def judge_ab(ticker: str, snapshot: str = "", providers: str = "anthropic", judges: int = 3, out_dir: str = "reports"):
+    """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""
+    import asyncio
+    from pathlib import Path
+
+    from psycopg.types.json import Jsonb
+
+    from fundabot.db.session import connect
+    from fundabot.debate import judge
+    from fundabot.orchestrate.pipeline import analyze_full
+    from fundabot.retrieval.embed import OpenAIEmbedder
+
+    conn = connect()
+    sid = snapshot or latest_with_verdict(conn, ticker)
+    if sid is None:
+        raise typer.BadParameter(f"no snapshot of {ticker.upper()} has a stored full verdict")
+    with conn.cursor() as cur:
+        cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,)); old = cur.fetchone()[0]
+        cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'triage'", (sid,)); prior = cur.fetchone()
+    if prior and prior[0].get("baseline_claim_means"):
+        baseline = prior[0]["baseline_claim_means"]
+    else:  # the previous pipeline's round-2 rows (no _escalated marker) are about to be overwritten: keep their per-claim means
+        rows = [j for j in judge.load_judgements(conn, sid, 2) if "_escalated" not in j["output"]]
+        baseline = judge.mean_scores(rows, sorted({c["claim_id"] for j in rows for c in j["output"]["claims"]}))
+    adapters, screen_judges, judge_adapters = build_adapters(True, providers, "claude-sonnet-5-5", judges)
+    asyncio.run(analyze_full(conn, ticker, PERSONAS_ALL, adapters, screen_judges, judge_adapters, OpenAIEmbedder(), out_dir=Path(out_dir), run_kind="triage", snapshot_id=sid))
+    with conn.cursor() as cur:
+        cur.execute("UPDATE verdicts SET verdict = verdict || %s WHERE snapshot_id = %s AND run_kind = 'triage' RETURNING verdict", (Jsonb({"baseline_claim_means": baseline}), sid))
+        new = cur.fetchone()[0]
+    conn.commit()
+    typer.echo(f"{ticker.upper()} snapshot {sid}")
+    typer.echo(judge_ab_table(old, new))
+
+
 JUDGE_MODELS = {"anthropic": "claude-opus-5-5", "openai": "gpt-5.4", "gemini": None}  # None = the adapter's default
 SCREEN_MODELS = {"anthropic": "claude-haiku-5-5", "openai": "gpt-5.4-mini", "gemini": "gemini-3.8-flash"}  # --tier screen: cheap personas, same judges
 
 
+SCREEN_JUDGE_MODELS = SCREEN_MODELS  # the screen panel: one cheap judge per provider scores every claim first
+
+
 def build_adapters(full: bool, providers: str, model: str, judges: int, tier: str = "default"):
-    """Persona adapters for the run and judge adapters (only for --full). Missing keys fail here, loudly."""
+    """(persona adapters, screen judges, escalation judges); the judge panels are empty unless --full. Missing keys fail here, loudly."""
     if tier not in ("default", "screen"):
         raise typer.BadParameter("--tier must be default or screen")
     provider_names = ["anthropic", "openai", "gemini"] if full and providers == "anthropic" else [p.strip() for p in providers.split(",") if p.strip()]
     adapters = [make_adapter(p, SCREEN_MODELS[p] if tier == "screen" else (model if p == "anthropic" else None)) for p in provider_names]
     if not full:
-        return adapters, []
+        return adapters, [], []
     if judges not in (1, 3):
         raise typer.BadParameter("--judges must be 1 or 3")
-    judge_adapters = [make_adapter(p, JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in (["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"])]
-    return adapters, judge_adapters
+    panel = ["anthropic"] if judges == 1 else ["anthropic", "openai", "gemini"]
+    screen = [make_adapter(p, SCREEN_JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in panel]
+    judge_adapters = [make_adapter(p, JUDGE_MODELS[p], JUDGE_MAX_TOKENS) for p in panel]
+    return adapters, screen, judge_adapters
 
 
 @app.command()
@@ -203,12 +283,12 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    adapters, judge_adapters = build_adapters(full, providers, model, judges, tier)
+    adapters, screen_judges, judge_adapters = build_adapters(full, providers, model, judges, tier)
     guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
     for t in tickers:
         try:
             if full:
-                html = asyncio.run(analyze_full(conn, t, names, adapters, judge_adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir),
+                html = asyncio.run(analyze_full(conn, t, names, adapters, screen_judges, judge_adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir),
                                                 guidance_adapter=guidance_adapter))
             else:
                 html = asyncio.run(run(conn, t, names, adapters, embedder, force=force, rerun=rerun, out_dir=Path(out_dir), guidance_adapter=guidance_adapter))
@@ -259,14 +339,14 @@ def scan_runner(full: bool, providers: str = "anthropic", model: str = "claude-s
     from fundabot.orchestrate.pipeline import analyze as run, analyze_full
     from fundabot.retrieval.embed import OpenAIEmbedder
 
-    adapters, judge_adapters = build_adapters(full, providers, model, judges, tier)
+    adapters, screen_judges, judge_adapters = build_adapters(full, providers, model, judges, tier)
     guidance_adapter = make_adapter("anthropic", GUIDANCE_MODEL, 8000)
 
     async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
         conn = connect()
         try:
             if full_run:
-                html = await analyze_full(conn, ticker, PERSONAS_ALL, adapters, judge_adapters, OpenAIEmbedder(), force=force, out_dir=Path("reports"), guidance_adapter=guidance_adapter)
+                html = await analyze_full(conn, ticker, PERSONAS_ALL, adapters, screen_judges, judge_adapters, OpenAIEmbedder(), force=force, out_dir=Path("reports"), guidance_adapter=guidance_adapter)
             else:
                 html = await run(conn, ticker, PERSONAS_ALL, adapters, OpenAIEmbedder(), force=force, out_dir=Path("reports"), guidance_adapter=guidance_adapter)
             with conn.cursor() as cur:

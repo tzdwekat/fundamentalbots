@@ -32,6 +32,7 @@ uv run fundabot analyze NVDA --full          # Phase 3: 5 personas x 3 providers
                                              #   scored verdict -> reports/NVDA/<snapshot>-full.html   (--judges 1 for one judge)
 uv run fundabot grid NVDA                    # persona x provider score grid with row/column spreads and hallucination rates
 uv run fundabot cost NVDA                    # per-round tokens (input / cached / cache-write / output) and USD for the latest snapshot
+uv run fundabot judge-ab NVDA                # re-judge the stored snapshot with the screen/escalation panels and compare with its verdict
     --tier screen                            # analyze/scan/worker: personas on Haiku 5.5 / gpt-5.4-mini / Gemini Flash; judges unchanged
 ```
 
@@ -51,6 +52,15 @@ hard cap (the adapter refuses calls once the month's logged spend reaches it). M
 on `claude-sonnet-5-5`: $0.43 per ticker and 1-1.5 minutes (2026-10-15, before the token work: $1.00 and 2 minutes).
 Embeddings for a ticker's 13 filings: about $0.006 once. A re-run on the same snapshot costs $0. `fundabot cost T` sums
 every run logged against the latest snapshot, so after `--rerun` it includes the discarded rounds too.
+
+How the judges work (judge triage, 2026-10-19): a screen panel of one cheap judge per provider (`claude-haiku-5-5`,
+`gpt-5.4-mini`, `gemini-3.8-flash`) scores every surviving claim with its evidence. A claim escalates to the strong panel
+(`claude-opus-5-5`, `gpt-5.4`, `gemini-3.1-pro-preview`) when the screen judges' strength spread is 2 or more, any screen
+judge rated it materiality 4 or more, it was refuted, or fewer than two screen judges scored it. The strong panel sees the
+escalated claims with their evidence, the screen panel's scores on them and a one-line list of the unanimous claims, and
+supplies the sub-scores, catalysts and summary. Every claim in the verdict says which panel judged it; the rule and the
+merge are code, not model output. `fundabot judge-ab T` re-judges a stored snapshot this way and prints the before/after
+(composite, sub-scores, escalation count, reclassified claims, pass-through deltas) with a ship/widen line.
 
 How the persona prompt got cheaper (Phase 5a): the metrics table is pruned to what the report shows (about 13k tokens instead
 of 25k, raw XBRL items at fiscal-year columns only); boilerplate excerpts that repeat across filings are kept once (newest

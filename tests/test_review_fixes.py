@@ -21,8 +21,8 @@ def test_phase2_command_builds_no_judges_without_gemini_key(monkeypatch):
     from fundabot.cli import build_adapters
 
     monkeypatch.setattr(settings, "gemini_api_key", "")
-    adapters, judges = build_adapters(full=False, providers="anthropic", model="claude-sonnet-5-5", judges=3)
-    assert [a.provider for a in adapters] == ["anthropic"] and judges == []
+    adapters, screen, judges = build_adapters(full=False, providers="anthropic", model="claude-sonnet-5-5", judges=3)
+    assert [a.provider for a in adapters] == ["anthropic"] and screen == [] and judges == []
     with pytest.raises(Exception):
         build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=3)  # gemini needed, no key: fail loudly
 
@@ -172,8 +172,10 @@ async def test_grid_budget_checked_across_providers(db_conn, monkeypatch):
 def test_screen_tier_only_affects_personas():
     from fundabot.cli import build_adapters
 
-    adapters, judges = build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=3, tier="screen")
+    adapters, screen, judges = build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=3, tier="screen")
     assert [a.model for a in adapters] == ["claude-haiku-5-5", "gpt-5.4-mini", "gemini-3.8-flash"]
-    assert [j.model for j in judges] == ["claude-opus-5-5", "gpt-5.4", "gemini-3.1-pro-preview"]  # judges keep the strong models
-    default, _ = build_adapters(full=False, providers="anthropic", model="claude-sonnet-5-5", judges=3)
-    assert [a.model for a in default] == ["claude-sonnet-5-5"]
+    assert [j.model for j in screen] == ["claude-haiku-5-5", "gpt-5.4-mini", "gemini-3.8-flash"]
+    assert [j.model for j in judges] == ["claude-opus-5-5", "gpt-5.4", "gemini-3.1-pro-preview"]  # the escalation panel keeps the strong models
+    default, screen1, judges1 = build_adapters(full=True, providers="anthropic", model="claude-sonnet-5-5", judges=1)
+    assert [a.model for a in default] == ["claude-sonnet-5-5", "gpt-5.4", "gemini-3.1-pro-preview"]
+    assert [j.model for j in screen1] == ["claude-haiku-5-5"] and [j.model for j in judges1] == ["claude-opus-5-5"]
