@@ -31,25 +31,37 @@ uv run fundabot analyze NVDA AMD [--open]    # five persona agents on Claude -> 
 uv run fundabot analyze NVDA --full          # Phase 3: 5 personas x 3 providers, rebuttal round, 3 judges + reconcile,
                                              #   scored verdict -> reports/NVDA/<snapshot>-full.html   (--judges 1 for one judge)
 uv run fundabot grid NVDA                    # persona x provider score grid with row/column spreads and hallucination rates
+uv run fundabot cost NVDA                    # per-round tokens (input / cached / cache-write / output) and USD for the latest snapshot
+    --tier screen                            # analyze/scan/worker: personas on Haiku 5.5 / gpt-5.4-mini / Gemini Flash; judges unchanged
 ```
 
 Provider defaults: personas on `claude-sonnet-5-5`, `gpt-5.4`, `gemini-3.1-pro-preview`; judges on `claude-opus-5-5`, `gpt-5.4`,
 `gemini-3.1-pro-preview`. The Gemini key needs billing enabled (a free-tier key only serves `gemini-3.8-flash`, slowly).
 Every round is cached per snapshot: a repeated `--full` run on the same day costs $0; `--rerun` discards all rounds.
 
-Measured on 2026-10-15 for AAPL `--full` (Gemini column failed on free-tier limits, so 10 agents + 2 judges): $3.23 and
-166 seconds. Per provider: Sonnet 5.5 personas + rebuttals $1.25 (10 calls, 525k input tokens), GPT-5.4 personas, rebuttals and
-judge rounds $1.34 (12 calls), Opus 5.5 judge rounds $0.64 (2 calls, 101k input). A second run with the Gemini Flash
-column serialized on the free tier: $4.84 and 20 minutes (3 of 5 Gemini cells and no Gemini judge survived the quota). With
-Gemini Pro on a paid key expect roughly $5-6 and about 5 minutes.
+Measured on 2026-10-18 for AAPL `--full` (15 agents, 3 judges, Gemini Pro): $3.54 and 5 minutes 18 seconds. By round:
+personas $1.06 (15 calls), rebuttals $0.72 (15 calls), judge round 1 $1.08, judge round 2 $0.67. Before the token work
+(2026-10-16, NVDA, same setup) a full run was $5.59; the judges are now the biggest line and the next thing to trim.
 
 Keys: Phase 1 commands need none. `analyze` needs `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (embeddings).
 A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_ID` (Console -> Settings -> Workspaces).
 
-Costs: every model call is logged in `model_calls` with tokens and USD; `FUNDABOT_MONTHLY_BUDGET_USD` is a hard cap
-(the adapter refuses calls once the month's logged spend reaches it). Measured on 2026-10-15 for AAPL, five personas on
-`claude-sonnet-5-5`: about 84k input and 2.5-3.6k output tokens per persona, $0.98 per ticker, 2 minutes wall time
-(personas run sequentially). Embeddings for a ticker's 13 filings: about $0.006 once. A re-run on the same snapshot costs $0.
+Costs: every model call is logged in `model_calls` with tokens, cached tokens and USD; `FUNDABOT_MONTHLY_BUDGET_USD` is a
+hard cap (the adapter refuses calls once the month's logged spend reaches it). Measured on 2026-10-18 for AAPL, five personas
+on `claude-sonnet-5-5`: $0.42 per ticker and 60 seconds (2026-10-15, before the token work: $1.00 and 2 minutes).
+Embeddings for a ticker's 13 filings: about $0.006 once. A re-run on the same snapshot costs $0. `fundabot cost T` sums
+every run logged against the latest snapshot, so after `--rerun` it includes the discarded rounds too.
+
+How the persona prompt got cheaper (Phase 5a): the metrics table is pruned to what the report shows (about 13k tokens instead
+of 25k, raw XBRL items at fiscal-year columns only); boilerplate excerpts that repeat across filings are kept once (newest
+filing wins); retrieval is split into a shared set from the base queries (12k tokens, identical for every persona) and a
+per-persona set (8k); and the shared part of the prompt (snapshot, metrics, red flags, shared excerpts, hard rules) is one
+cacheable prefix. The first call per provider runs alone to warm the cache, then the rest fan out: Anthropic caches it with
+`cache_control` (reads 0.1x, writes 1.25x), OpenAI caches the identical prefix automatically (0.1x), and Gemini gets one
+explicit cache per grid (its implicit cache misses whenever the user turn differs; creation is billed once at the normal
+rate and logged as cache-write tokens on the first call). On the AAPL run above each follow-up persona call read 33-40k
+tokens from cache. `--tier screen` puts the personas on Haiku 5.5 / gpt-5.4-mini / Gemini Flash for a cheap first pass
+while the judges keep the strong models.
 
 ## What the report contains
 
@@ -93,9 +105,9 @@ Haiku extraction records guidance statements and management tone as verbatim quo
 metrics table gets `guidance_direction` and `management_tone` (-1/0/+1, flagged `llm_extracted`); numbers from models never
 enter the table. Quarterly consensus, 13F ownership change and insider net activity are also in (flagged `vendor_fmp`).
 
-**Cost arithmetic.** Weekly scan is the cheap run (~$1 per ticker); full runs happen on earnings events (~4 per ticker per
-year at ~$5-6). A 20-ticker watchlist is roughly $130 a month, inside the $500 monthly cap in `.env`. A weekly `--full` scan
-of 20 tickers would be ~$450 a month.
+**Cost arithmetic.** Weekly scan is the cheap run (~$0.45 per ticker); full runs happen on earnings events (~4 per ticker per
+year at ~$3.50). A 20-ticker watchlist is roughly $60 a month, inside the $500 monthly cap in `.env`. A weekly `--full` scan
+of 20 tickers would be ~$300 a month.
 
 **Calibration caveat.** It needs at least 10 verdicts older than the horizon before it prints any statistic; before then it
 says "insufficient history". The first 30-day read is possible about a month after the watchlist starts running.
