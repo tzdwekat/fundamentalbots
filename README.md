@@ -33,6 +33,7 @@ uv run fundabot analyze NVDA --full          # Phase 3: 5 personas x 3 providers
 uv run fundabot grid NVDA                    # persona x provider score grid with row/column spreads and hallucination rates
 uv run fundabot cost NVDA                    # per-round tokens (input / cached / cache-write / output) and USD for the latest snapshot
 uv run fundabot judge-ab NVDA                # re-judge the stored snapshot with the screen/escalation panels and compare with its verdict
+    --profile anthropic|openai|gemini|multi  # analyze/scan/worker/judge-ab: which provider(s) fill every role (fundabot/profiles.yaml)
     --tier screen                            # analyze/scan/worker: personas on Haiku 5.5 / gpt-5.4-mini / Gemini Flash; judges unchanged
 ```
 
@@ -69,6 +70,16 @@ outputs: requiring two screen judges at materiality 4 escalates 50-62% but lets 
 through on HALO; a mean of 4 escalates 36-40% but passes 10-12 claims the previous strong panel had rated material. The
 rule stays "any screen judge at 4" (`judge.ESCALATE_MATERIALITY`); the larger saving comes from running one provider
 (see profiles below).
+
+Provider profiles (2026-10-19): `fundabot/profiles.yaml` maps each role (personas and their rebuttals, screen judge
+panel, escalation judge panel, guidance extraction) to provider and model; `--profile` picks one at run time and the
+pipeline is otherwise identical. `multi` is the three-provider layout above. `anthropic`, `openai` and `gemini` run the
+whole debate on one provider: five persona cells, rebuttals on the same models, one screen judge and one escalation
+judge. Add a profile by adding a key to the file; every role is required. Embeddings stay on OpenAI. Measured on 2026-10-19:
+`analyze MSFT --full --profile openai` cost $0.78 and took 2 minutes 18 seconds (personas $0.36, rebuttals $0.25, screen
+judge $0.04, escalation judge $0.10, guidance $0.03; 30 of 46 claims escalated) against about $3.00 for the same run on
+`multi`. A single-provider verdict loses the cross-provider dispersion and judge-agreement signals, so the grid shows one
+column and judge agreement is always 1.0.
 
 How the persona prompt got cheaper (Phase 5a): the metrics table is pruned to what the report shows (about 13k tokens instead
 of 25k, raw XBRL items at fiscal-year columns only); boilerplate excerpts that repeat across filings are kept once (newest
