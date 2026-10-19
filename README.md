@@ -48,7 +48,7 @@ A user-scoped Anthropic key (`sk-ant-usr-...`) also needs `ANTHROPIC_WORKSPACE_I
 
 Costs: every model call is logged in `model_calls` with tokens, cached tokens and USD; `FUNDABOT_MONTHLY_BUDGET_USD` is a
 hard cap (the adapter refuses calls once the month's logged spend reaches it). Measured on 2026-10-18 for AAPL, five personas
-on `claude-sonnet-5-5`: $0.42 per ticker and 60 seconds (2026-10-15, before the token work: $1.00 and 2 minutes).
+on `claude-sonnet-5-5`: $0.43 per ticker and 1-1.5 minutes (2026-10-15, before the token work: $1.00 and 2 minutes).
 Embeddings for a ticker's 13 filings: about $0.006 once. A re-run on the same snapshot costs $0. `fundabot cost T` sums
 every run logged against the latest snapshot, so after `--rerun` it includes the discarded rounds too.
 
