@@ -168,3 +168,11 @@ async def test_grid_stores_shared_plus_own_chunk_ids(db_conn):
     ids = [set(r["chunk_ids"]) for r in rows]
     assert ids[0] & ids[1]  # shared chunks appear in both agents' stored ids
     assert all(len(set(r["chunk_ids"])) == len(r["chunk_ids"]) for r in rows)  # no duplicates
+
+
+def test_snapshot_block_has_company_line(aapl_metrics):
+    snap = {"id": "s", "price_date": None, "latest_close": None, "accessions": [], "profile": {"name": "Apple Inc.", "sector": "Technology", "industry": "Consumer Electronics", "employees": 166000, "description": "Apple Inc. designs " + "x" * 300}}
+    text = context.shared_prefix("AAPL", snap, aapl_metrics, [], [])
+    head = text.split("METRICS")[0]
+    assert "company: Apple Inc. · Technology · Consumer Electronics · 166,000 employees" in head and "about: Apple Inc. designs" in head and len(head) < 900
+    assert "company:" not in context.shared_prefix("AAPL", {**snap, "profile": None}, aapl_metrics, [], []).split("METRICS")[0]

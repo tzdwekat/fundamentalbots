@@ -4,6 +4,7 @@ from pathlib import Path
 import markdown
 from jinja2 import Environment, FileSystemLoader
 
+from fundabot.analytics.earnings import IDS as EARNINGS_IDS
 from fundabot.analytics.metrics import Metric
 from fundabot.analytics.valuation import DISCOUNT_RATE, TERMINAL_GROWTH, YEARS
 from fundabot.report import charts
@@ -21,7 +22,7 @@ def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flag
     from fundabot.agents.context import metric_line
     from fundabot.agents.runner import PERSONA_ORDER
 
-    earnings_lines = [metric_line(m) for m in metrics if ("vendor_fmp" in m.flags or "llm_extracted" in m.flags) and m.value is not None]
+    earnings_lines = [metric_line(m) for m in metrics if (m.metric_id in EARNINGS_IDS or "llm_extracted" in m.flags) and m.value is not None]
     cells = {tuple(k.split("/")): (c.get("score") if c else None) for k, c in verdict["grid"].items()}
     for p in PERSONA_ORDER:
         for pr in verdict["providers"]:

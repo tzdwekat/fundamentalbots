@@ -85,6 +85,14 @@ def _recent_fetch(conn: psycopg.Connection, cik: int, max_age_hours: float = 24)
     return row[0] if row else None
 
 
+def _treasury_json(t):
+    return {"date": t[0].isoformat(), "year10": t[1]} if t else None
+
+
+def _treasury(v):
+    return (date.fromisoformat(v["date"]), float(v["year10"])) if v else None
+
+
 def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     """Ingest -> snapshot -> metrics -> flags (no model calls; guidance metrics come from cached extractions)."""
     ticker = ticker.upper()
@@ -124,11 +132,26 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     latest_fetch = fmp_data["estimates"].fetched_at.max() if len(fmp_data["estimates"]) else None
     cur_price = next((m.value for m in val if m.metric_id == "price" and m.period == "current"), None)
     earn = earnings.compute_earnings_metrics(fmp_data, as_of, cur_price, periods.fiscal_year_end(facts, tag_map), periods.fy_offset(facts, tag_map), latest_fetch)
+    from fundabot.analytics import fmp_metrics
+    from fundabot.ingest import fmp_extra
+
+    for step in (fmp_extra.ingest_profile, fmp_extra.ingest_peers, fmp_extra.ingest_segments, fmp_extra.ingest_dividends, fmp_extra.ingest_volume,
+                 fmp_extra.ingest_insider_trades, fmp_extra.ingest_holders):
+        try:
+            step(conn, cik, ticker)
+        except Exception as e:  # each dataset is optional input; stored rows stay
+            log.warning("%s: %s failed: %s", ticker, step.__name__, e)
+            conn.rollback()
+    profile = fmp_extra.load_profile(conn, cik) or {}
+    own = {m.metric_id: m.value for m in val if m.period == "current" and m.metric_id in ("pe", "ev_sales")}
+    fmp_m = fmp_metrics.compute_fmp_metrics(fmp_extra.load_peers(conn, cik), fmp_extra.load_segments(conn, cik), fmp_extra.load_dividends(conn, cik),
+                                            fmp_extra.fact(conn, cik, "scores", lambda: fmp_extra.fetch_scores(ticker), 24),
+                                            _treasury(fmp_extra.fact(conn, 0, "treasury_10y", lambda: _treasury_json(fmp_extra.fetch_treasury_10y()), 24)), cur_price, own, today=as_of)
     from fundabot.analytics import guidance as guidance_mod
 
     fye, offset = periods.fiscal_year_end(facts, tag_map), periods.fy_offset(facts, tag_map)
     guid = guidance_mod.metrics(guidance_mod.load(conn, cik, [a for a in accessions if a.startswith("T")]), label_fn=_guidance_label(fye, offset))
-    flags = red_flags.numeric_flags(fundamentals)
+    flags = red_flags.numeric_flags(fundamentals + fmp_m, profile.get("sector"), profile.get("industry"))
     latest_10k = next((a for a in accessions if filings[filings.accession == a].form.iloc[0] == "10-K"), None)
     if latest_10k:
         flags += red_flags.text_flags(latest_10k, edgar_filings.load_sections(conn, latest_10k), filings)
@@ -137,7 +160,7 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     close = cur["price"].value if "price" in cur else None
     shares = cur["shares_outstanding"].value if "shares_outstanding" in cur else None
     sid = snapshot.create_snapshot(conn, ticker, cik, fetch_id, accessions, price_date, close, shares)
-    snapshot.store_metrics(conn, sid, fundamentals + val + earn + guid)
+    snapshot.store_metrics(conn, sid, fundamentals + val + earn + guid + fmp_m)
     snapshot.store_flags(conn, sid, flags)
     return sid
 
@@ -233,7 +256,7 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
         revised.setdefault(a["agent"], (a["grounded"]["score"], a["grounded"]["confidence"]))
 
     judged = judge.precheck(pool, resolvable)
-    earnings_available = any("vendor_fmp" in m.flags and m.value is not None for m in metrics)
+    earnings_available = any(m.metric_id in earnings.IDS and m.value is not None for m in metrics)
 
     def evidence_for(claims_subset):
         ids = sorted({e for c in claims_subset for e in c["evidence"]} | {e for c in claims_subset for r in c["refutations"] for e in r["evidence"]})

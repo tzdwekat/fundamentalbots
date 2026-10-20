@@ -122,3 +122,14 @@ def test_every_rule_label_is_reachable():
             for v in ("stretched", "fair", "cheap"):
                 seen.add(next(label for label, pred in T.RULES if pred(m, t, v)))
     assert seen == labels
+
+
+def test_outlook_peer_fallback():
+    ms = metrics(rev=(0.05, 0.05, 0.10, 0.12), pe_pct=None, evs_pct=None)
+    ms += [Metric("pe_vs_peer_median", "current", 1.4, "ratio", "peers:median"), Metric("ev_sales_vs_peer_median", "current", 0.7, "ratio", "peers:median")]
+    ms = [m for m in ms if not (m.metric_id.endswith("_5y_percentile"))]
+    o = T.outlook(stats(), ms)
+    assert o["label"] == "growing / extended" and o["components"]["valuation"]["state"] == "stretched" and o["components"]["valuation"]["basis"] == "pe_vs_peer_median"
+    ms2 = [m for m in ms if m.metric_id != "pe_vs_peer_median"]
+    o2 = T.outlook(stats(), ms2)
+    assert o2["components"]["valuation"]["state"] == "cheap" and o2["components"]["valuation"]["basis"] == "ev_sales_vs_peer_median" and o2["label"] == "growing / fair"

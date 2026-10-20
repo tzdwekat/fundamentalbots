@@ -7,6 +7,7 @@ from psycopg.types.json import Jsonb
 
 from fundabot.agents.base import run_batch
 from fundabot.agents.schemas import SchemaError
+from fundabot.analytics.earnings import IDS as EARNINGS_IDS
 from fundabot.analytics.metrics import Metric
 from fundabot.report.table import GROUPS
 
@@ -105,7 +106,7 @@ def build_message(pool, flags, metrics, earnings_available: bool, evidence: dict
     lines += ["", "METRICS_SUMMARY (latest fiscal year and current)"] + _metrics_summary(metrics)
     lines += ["", "CONSENSUS_DATA (FMP)"]
     if earnings_available:
-        lines += [metric_line(m) for m in metrics if "vendor_fmp" in m.flags or "llm_extracted" in m.flags]
+        lines += [metric_line(m) for m in metrics if m.metric_id in EARNINGS_IDS or "llm_extracted" in m.flags]
     else:
         lines.append("Consensus estimates are unavailable for this company; score earnings_momentum from reported results only and say so.")
     lines += ["", "AGENT_SCORES (revised after rebuttal)"] + [f"{a}: {s} (confidence {c})" for a, (s, c) in sorted(revised.items())]

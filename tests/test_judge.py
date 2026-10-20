@@ -168,3 +168,11 @@ def test_escalation_message_blocks():
     assert "SCREEN_PANEL_SCORES" in msg and "anthropic strength 2 materiality 3" in msg and "UNANIMOUS_CLAIMS" in msg and "a by bull/openai" in msg
     assert msg.index("SCREEN_PANEL_SCORES") < msg.index("UNANIMOUS_CLAIMS") < msg.index("EVIDENCE")
     assert "b by bull/openai" in msg.split("SCREEN_PANEL_SCORES")[0] and "a by bull/openai" not in msg.split("SCREEN_PANEL_SCORES")[0]
+
+
+def test_consensus_block_uses_earnings_ids_only():
+    ms = [Metric("eps_surprise", "Q3FY2026", 0.05, "ratio", "x", {}, ["vendor_fmp"]), Metric("seg_iphone_share", "FY2025", 0.5, "ratio", "fmp:revenue-product-segmentation", {}, ["vendor_fmp"]),
+          Metric("guidance_direction", "current", 1, "score", "x", {}, ["llm_extracted"])]
+    msg = judge.build_message([], [], ms, True, {}, {})
+    block = msg.split("CONSENSUS_DATA")[1].split("AGENT_SCORES")[0]
+    assert "eps_surprise" in block and "guidance_direction" in block and "seg_iphone" not in block

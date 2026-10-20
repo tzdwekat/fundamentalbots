@@ -91,7 +91,7 @@ def metric_line(m: Metric) -> str:
 def build_user_message(ticker: str, snapshot: dict, metrics: list[Metric], flags: list[RedFlag], chunks: list[Chunk], notes: list[str]) -> str:
     keep = select_periods(metrics)
     lines = [f"SNAPSHOT\nticker: {ticker}\nsnapshot_id: {snapshot['id']}\nprice_date: {snapshot.get('price_date')}\n"
-             f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}", ""]
+             f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}" + company_lines(snapshot.get("profile")), ""]
     lines.append("METRICS (one per line: id@period = value unit [flags] <- formula; cite by id)")
     for m in select_metrics(metrics, flags):
         lines.append(metric_line(m))
@@ -105,10 +105,20 @@ def build_user_message(ticker: str, snapshot: dict, metrics: list[Metric], flags
     return "\n".join(lines)
 
 
+def company_lines(profile: dict | None) -> str:
+    """What the company is, from the FMP profile, so a persona reads the numbers in context."""
+    if not profile:
+        return ""
+    emp = f" · {profile['employees']:,} employees" if profile.get("employees") else ""
+    about = (profile.get("description") or "").strip()
+    return (f"\ncompany: {profile.get('name')} · {profile.get('sector')} · {profile.get('industry')}{emp}"
+            + (f"\nabout: {about[:200]}{'…' if len(about) > 200 else ''}" if about else ""))
+
+
 def shared_prefix(ticker: str, snapshot: dict, metrics: list[Metric], flags: list[RedFlag], shared_chunks: list[Chunk]) -> str:
     """Byte-identical across the personas of one snapshot: the inputs every agent sees, then the hard rules."""
     lines = [f"SNAPSHOT\nticker: {ticker}\nsnapshot_id: {snapshot['id']}\nprice_date: {snapshot.get('price_date')}\n"
-             f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}", ""]
+             f"latest_close: {snapshot.get('latest_close')}\nfilings: {', '.join(snapshot.get('accessions') or [])}" + company_lines(snapshot.get("profile")), ""]
     lines.append("METRICS (one per line: id@period = value unit [flags] <- formula; cite by id)")
     lines += [metric_line(m) for m in select_metrics(metrics, flags)]
     lines += ["", "RED_FLAGS (rules engine)"]

@@ -97,3 +97,10 @@ def test_one_line_numbers_are_checked():
 def test_inline_ids_of_every_kind_are_not_numbers():
     out = {"sentences": [{"text": "The 8-K filing:0000320193-26-000077 and news:n1 preceded the price:2026-09-12 drop of 4.1%.", "evidence": ["filing:0000320193-26-000077", "news:n1", "price:2026-09-12"]}], "one_line": ""}
     assert moves.ground_narrative(out, inputs())["dropped"] == []
+
+
+def test_earnings_block_uses_earnings_ids_only():
+    inp = inputs()
+    inp["metrics"] = METRICS + [Metric("seg_iphone_share", "FY2025", 0.5, "ratio", "fmp:revenue-product-segmentation", {}, ["vendor_fmp"])]
+    block = moves.build_message(inp).split("EARNINGS")[1].split("EXCERPTS")[0]
+    assert "eps_surprise" in block and "revenue_yoy" in block and "seg_iphone" not in block

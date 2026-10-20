@@ -157,9 +157,16 @@ def outlook(stats: dict, metrics: list[Metric]) -> dict:
     momentum = {"revenue_yoy": rev, "eps_diluted_yoy": eps, "direction": _direction(rev),
                 "eps_beat_streak": _last(metrics, "eps_beat_streak"), "eps_estimate_revision_90d": _last(metrics, "eps_estimate_revision_90d")}
     pe_pct, evs_pct = _last(metrics, "pe_5y_percentile"), _last(metrics, "ev_sales_5y_percentile")
+    pe_rel, evs_rel = _last(metrics, "pe_vs_peer_median"), _last(metrics, "ev_sales_vs_peer_median")
     pct = pe_pct if pe_pct is not None else evs_pct
-    valuation = {"pe_5y_percentile": pe_pct, "ev_sales_5y_percentile": evs_pct,
-                 "state": None if pct is None else "stretched" if pct >= 0.8 else "cheap" if pct <= 0.2 else "fair"}
+    if pct is not None:
+        state, basis = ("stretched" if pct >= 0.8 else "cheap" if pct <= 0.2 else "fair"), ("pe_5y_percentile" if pe_pct is not None else "ev_sales_5y_percentile")
+    elif pe_rel is not None or evs_rel is not None:  # young listings: own history is thin, peers stand in
+        rel, basis = (pe_rel, "pe_vs_peer_median") if pe_rel is not None else (evs_rel, "ev_sales_vs_peer_median")
+        state = "stretched" if rel >= 1.25 else "cheap" if rel <= 0.8 else "fair"
+    else:
+        state, basis = None, None
+    valuation = {"pe_5y_percentile": pe_pct, "ev_sales_5y_percentile": evs_pct, "pe_vs_peer_median": pe_rel, "ev_sales_vs_peer_median": evs_rel, "state": state, "basis": basis}
     if stats.get("ma200") is None or stats.get("ma50") is None or stats.get("ma50_slope_20d") is None:
         trend_state = None
     elif stats["above_ma50"] and stats["above_ma200"] and stats["ma50_slope_20d"] > 0:

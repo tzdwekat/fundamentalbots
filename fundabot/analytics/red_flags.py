@@ -28,8 +28,16 @@ def _fy_rows(metrics: list[Metric], metric_id: str) -> list[Metric]:
     return sorted(rows, key=lambda m: m.period)
 
 
-def numeric_flags(metrics: list[Metric]) -> list[RedFlag]:
+ALTMAN_SKIP_SECTORS = ("financial services",)  # the Z-score is undefined for banks, insurers and REITs; a high flag would cap their composite
+ALTMAN_DISTRESS = 1.8
+
+
+def numeric_flags(metrics: list[Metric], sector: str | None = None, industry: str | None = None) -> list[RedFlag]:
     flags = []
+    z = next((m for m in metrics if m.metric_id == "altman_z" and m.period == "current" and m.value is not None), None)
+    financial = (sector or "").lower() in ALTMAN_SKIP_SECTORS or "reit" in (industry or "").lower()
+    if z and z.value < ALTMAN_DISTRESS and not financial:
+        flags.append(RedFlag("altman_z_distress", "high", ["metric:altman_z@current"], f"Altman Z {z.value:.2f} < {ALTMAN_DISTRESS} (distress zone; FMP financial scores)"))
     acc = _fy_rows(metrics, "accruals_ratio")
     if acc and acc[-1].value > 0.10:
         flags.append(RedFlag("accruals_high", "high", [f"metric:accruals_ratio@{acc[-1].period}"],

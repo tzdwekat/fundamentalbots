@@ -34,6 +34,8 @@ def load_analyses(conn: psycopg.Connection, sid: str, status: str | None = "ok")
 async def run_grid(conn: psycopg.Connection, sid: str, persona_names: list[str], adapters: list[Adapter], embedder) -> list[dict]:
     """Every (persona, adapter) cell without a cached ok analysis is run; failures are stored as status='failed' and skipped."""
     s = snap.load(conn, sid)
+    from fundabot.ingest.fmp_extra import load_profile
+    s["profile"] = load_profile(conn, s["cik"])
     metrics, flags = snap.load_metrics(conn, sid), snap.load_flags(conn, sid)
     all_personas = personas.load_all()
     cached = {(a["persona"], a["provider"], a["model"]) for a in load_analyses(conn, sid)}

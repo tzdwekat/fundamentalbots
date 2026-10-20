@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from fundabot.agents.base import run_batch
 from fundabot.agents.context import metric_line, select_metrics
+from fundabot.analytics.earnings import IDS as EARNINGS_IDS
 from fundabot.eval.grounding import _supported, extract_numbers
 
 NARRATIVE_SCHEMA = {
@@ -62,7 +63,7 @@ def build_message(inputs: dict) -> str:
     lines += ["", "NEWS (id, date, publisher, title, start of text)"]
     lines += [f"news:{n['id']} {n['published'].date() if hasattr(n['published'], 'date') else n['published']} {n.get('publisher') or ''}: {n['title']} -- {(n.get('text') or '')[:300]}"
               for n in inputs["news"]] or ["none"]
-    lines += ["", "EARNINGS (metrics)"] + [metric_line(m) for m in inputs["metrics"] if "vendor_fmp" in m.flags or "llm_extracted" in m.flags or m.metric_id.endswith("_yoy")] or ["none"]
+    lines += ["", "EARNINGS (metrics)"] + [metric_line(m) for m in inputs["metrics"] if m.metric_id in EARNINGS_IDS or "llm_extracted" in m.flags or (m.metric_id.endswith("_yoy") and not m.metric_id.startswith("seg_"))] or ["none"]
     lines += ["", "EXCERPTS (filings and calls in the window)"] + [f"--- chunk:{c.id}\n{c.text}" for c in inputs["chunks"]] or ["none"]
     lines += ["", "Write the narrative as JSON following the schema."]
     return "\n".join(lines)

@@ -72,3 +72,15 @@ def test_going_concern_negation_ignored_and_sentence_in_detail():
     pos = {"item8": "Intro text. These conditions raise substantial doubt about the Company's ability to continue as a going concern within one year. Next."}
     flags = text_flags("a", pos, filings_df([]))
     assert len(flags) == 1 and "raise substantial doubt" in flags[0].detail
+
+
+def test_altman_flag_and_financials_skip():
+    from fundabot.analytics.metrics import Metric
+
+    low = [Metric("altman_z", "current", 1.42, "score", "fmp:financial-scores", {}, ["vendor_fmp"])]
+    flags = numeric_flags(low, sector="Technology", industry="Consumer Electronics")
+    assert [f.flag_id for f in flags] == ["altman_z_distress"] and flags[0].severity == "high" and flags[0].evidence == ["metric:altman_z@current"]
+    assert numeric_flags(low, sector="Financial Services", industry="Banks") == []
+    assert numeric_flags(low, sector="Real Estate", industry="REIT - Retail") == []
+    assert numeric_flags([Metric("altman_z", "current", 3.0, "score", "x")], sector="Technology") == []
+    assert numeric_flags(low) == [] or numeric_flags(low)[0].flag_id == "altman_z_distress"  # unknown sector: the rule still applies
