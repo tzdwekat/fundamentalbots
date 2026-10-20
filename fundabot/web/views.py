@@ -12,7 +12,7 @@ from fundabot.config import settings
 from fundabot.db.session import connect  # noqa: F401  (re-exported for the app; tests patch settings.database_url)
 from fundabot.debate import claims
 from fundabot.eval import calibration
-from fundabot.ingest import edgar_filings, grades, news, prices
+from fundabot.ingest import edgar_filings, fmp_extra, grades, news, prices
 from fundabot.orchestrate import snapshot, watchlist
 from fundabot.report import charts
 from fundabot.retrieval.query import load_chunks
@@ -221,11 +221,12 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page = {"ticker": ticker, "cik": cik, "window_days": window_days, "news_days": news_days, "windows": WINDOWS, "news_windows": NEWS_WINDOWS,
             "narrative_estimate": NARRATIVE_ESTIMATE, "stats": None, "chart_svg": None, "moves": [], "outlook": {"label": "insufficient data", "components": {}, "rule": "no data"},
             "narrative": None, "narrative_stale": False, "news": [], "panel": None, "snapshot": None, "ownership": [], "next_earnings": None, "reports": [],
-            "on_watchlist": any(e["ticker"] == ticker for e in watchlist.entries(conn))}
+            "on_watchlist": any(e["ticker"] == ticker for e in watchlist.entries(conn)), "profile": None, "peers": [], "peer_rows": [], "peer_medians": {}, "segments": [],
+            "dividends": {}, "dividend_rows": [], "insider_trades": [], "holders": [], "scores": {}, "ratings": None, "crosscheck": None, "risk_free": None}
     if cik is None:
         return page
     if refresh:
-        refresh_prices(conn, cik, ticker); refresh_news(conn, cik, ticker); refresh_grades(conn, cik, ticker); refresh_benchmark(conn)
+        refresh_prices(conn, cik, ticker); refresh_news(conn, cik, ticker); refresh_grades(conn, cik, ticker); refresh_benchmark(conn); refresh_fmp(conn, cik, ticker)
     px = prices.load(conn, cik)
     snap = latest_snapshot_with_metrics(conn, ticker)
     metrics = snapshot.load_metrics(conn, snap["id"]) if snap else []
@@ -243,6 +244,8 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page["news"] = news.load(conn, cik, news_days, until=stats.get("asof") or date.today())
     page["panel"] = panel_for(conn, ticker)
     page["metrics_snapshot_id"] = snap["id"] if snap else None
+    cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
+    page.update(fmp_sections(conn, cik, metrics, cur.get("pe"), cur.get("ev_sales")))
     return page
 
 
@@ -251,7 +254,9 @@ def overview(conn) -> list[dict]:
 
     rows = []
     spy = _spy(conn)
-    for e in watchlist.entries(conn):
+    entries = watchlist.entries(conn)
+    quotes = live_quotes(conn, [e["ticker"] for e in entries])
+    for e in entries:
         t = e["ticker"]
         cik = e.get("cik") or cik_for(conn, t)
         stats = stats_with_benchmark(prices.load(conn, cik), spy) if cik else technicals.price_stats(pd.DataFrame(columns=["date", "close"]))
@@ -268,7 +273,8 @@ def overview(conn) -> list[dict]:
             cur.execute("SELECT status FROM run_queue WHERE ticker = %s AND status IN ('queued', 'started') ORDER BY id DESC LIMIT 1", (t,))
             q = cur.fetchone()
         rows.append({"ticker": t, "close": stats.get("close"), "ret_1m": stats.get("ret_1m"), "ret_3m": stats.get("ret_3m"), "ret_6m": stats.get("ret_6m"),
-                     "outlook": technicals.outlook(stats, metrics)["label"], "composite": composite, "verdict_date": verdict_date, "queue_status": q[0] if q else None})
+                     "outlook": technicals.outlook(stats, metrics)["label"], "composite": composite, "verdict_date": verdict_date, "queue_status": q[0] if q else None,
+                     "quote": quotes.get(t)})
     return rows
 
 
@@ -304,3 +310,54 @@ def month_spend(conn) -> tuple[float, float]:
     from fundabot.agents.base import month_spend as spend
 
     return spend(conn), float(settings.fundabot_monthly_budget_usd)
+
+
+def refresh_fmp(conn, cik: int, ticker: str) -> None:
+    """Profile, peers, segments, dividends, insider trades, holders on their own refresh rules; failures keep stored rows."""
+    for step in (fmp_extra.ingest_profile, fmp_extra.ingest_peers, fmp_extra.ingest_segments, fmp_extra.ingest_dividends, fmp_extra.ingest_insider_trades, fmp_extra.ingest_holders):
+        try:
+            step(conn, cik, ticker)
+        except Exception as e:
+            log.warning("%s: %s failed: %s", ticker, step.__name__, e)
+            conn.rollback()
+
+
+def live_quotes(conn, tickers: list[str]) -> dict[str, dict]:
+    """One batch-quote call for the overview, cached 15 minutes under cik 0."""
+    if not tickers:
+        return {}
+    key = "quotes:" + ",".join(sorted(t.upper() for t in tickers))
+    return fmp_extra.fact(conn, 0, key, lambda: fmp_extra.batch_quotes(tickers), 0.25) or {}
+
+
+def segment_table(metrics: list[Metric]) -> list[dict]:
+    """Latest two fiscal years per segment: name, share, growth, revenue; from the seg_* metrics."""
+    rows = {}
+    for m in metrics:
+        if not m.metric_id.startswith("seg_") or m.value is None:
+            continue
+        base, field = m.metric_id.rsplit("_", 1)
+        kind = "product" if "product" in m.formula_id else "geographic"
+        rows.setdefault((kind, base), {"kind": kind, "name": m.inputs.get("name", base[4:]), "years": {}})["years"].setdefault(m.period, {})[field] = m.value
+    out = []
+    for (kind, base), r in rows.items():
+        years = sorted(r["years"], key=lambda p: int(p[2:]))[-2:]
+        latest = r["years"][years[-1]] if years else {}
+        out.append({"kind": kind, "name": r["name"], "fy": years[-1] if years else None, "share": latest.get("share"), "yoy": latest.get("yoy"), "revenue": latest.get("revenue"),
+                    "prev_share": r["years"][years[0]].get("share") if len(years) == 2 else None})
+    return sorted(out, key=lambda r: (r["kind"], -(r["share"] or 0)))
+
+
+def fmp_sections(conn, cik: int, metrics: list[Metric], own_pe: float | None, own_ev_sales: float | None) -> dict:
+    cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
+    peers = fmp_extra.load_peers(conn, cik)
+    own_row = {"peer": "(this company)", "name": "", "pe_ttm": own_pe, "ev_sales_ttm": own_ev_sales, "market_cap": cur.get("market_cap"), "own": True}
+    with conn.cursor() as c2:
+        c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key IN ('ratings', 'fmp_crosscheck')) OR (cik = 0 AND key = 'treasury_10y')", (cik,))
+        facts = dict(c2.fetchall())
+    return {"profile": fmp_extra.load_profile(conn, cik), "peers": peers, "peer_rows": ([own_row] + peers) if peers else [],
+            "peer_medians": {k: cur.get(k) for k in ("pe_peer_median", "pe_vs_peer_median", "ev_sales_peer_median", "ev_sales_vs_peer_median", "ev_ebitda_peer_median")},
+            "segments": segment_table(metrics), "dividends": {k: cur.get(k) for k in ("dividend_per_share_ttm", "dividend_yield", "dividend_growth_5y")},
+            "dividend_rows": fmp_extra.load_dividends(conn, cik)[:4], "insider_trades": fmp_extra.load_insider_trades(conn, cik, limit=12), "holders": fmp_extra.load_holders(conn, cik),
+            "scores": {"altman_z": cur.get("altman_z"), "piotroski": cur.get("piotroski")}, "ratings": facts.get("ratings"), "crosscheck": facts.get("fmp_crosscheck"),
+            "risk_free": facts.get("treasury_10y")}

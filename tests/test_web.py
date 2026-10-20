@@ -23,6 +23,8 @@ def client(monkeypatch, db_conn):
     monkeypatch.setattr(views, "refresh_news", lambda conn, cik, ticker: 0)
     monkeypatch.setattr(views, "refresh_grades", lambda conn, cik, ticker: 0)
     monkeypatch.setattr(views, "refresh_benchmark", lambda conn: None)
+    monkeypatch.setattr(views, "refresh_fmp", lambda conn, cik, ticker: None)
+    monkeypatch.setattr(views, "live_quotes", lambda conn, tickers: {})
     monkeypatch.setattr(views, "next_earnings", lambda conn, cik, ticker: date(2026, 11, 2))
     monkeypatch.setattr(views, "list_filings", lambda cik: pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"]))
     return TestClient(webapp.app)
@@ -222,3 +224,60 @@ def test_pages_preselect_the_settings_profile(client, db_conn, monkeypatch):
     assert 'value="anthropic" selected' in client.get("/t/AAPL").text and "default profile" in client.get("/").text
     monkeypatch.setattr(settings, "fundabot_profile", "openai")
     assert 'value="openai" selected' in client.get("/t/AAPL").text
+
+
+def seed_fmp(conn, cik=320193):
+    from psycopg.types.json import Jsonb as J
+
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO company_profile (cik, name, sector, industry, exchange, description, employees, beta) VALUES (%s, 'Apple Inc.', 'Technology', 'Consumer Electronics', 'NASDAQ', 'Makes phones.', 166000, 1.07)", (cik,))
+        cur.execute("INSERT INTO peers (cik, peer, name, market_cap, price, year_high, year_low, pe_ttm, ev_sales_ttm, ev_ebitda_ttm) VALUES (%s, 'SONY', 'Sony Group', 1.2e11, 20.0, 25.0, 15.0, 18.5, 1.9, 9.0)", (cik,))
+        cur.execute("INSERT INTO segments (cik, kind, fiscal_year, name, revenue) VALUES (%s, 'product', 2025, 'iPhone', 209586000000), (%s, 'product', 2024, 'iPhone', 201183000000), (%s, 'product', 2025, 'Mac', 33708000000), (%s, 'product', 2024, 'Mac', 29984000000)", (cik, cik, cik, cik))
+        cur.execute("INSERT INTO dividends (cik, ex_date, amount, adj_amount) VALUES (%s, '2026-08-10', 0.27, 0.27), (%s, '2026-05-11', 0.27, 0.27), (%s, '2026-02-09', 0.26, 0.26), (%s, '2025-11-10', 0.26, 0.26)", (cik, cik, cik, cik))
+        cur.execute("INSERT INTO insider_trades (cik, filing_date, transaction_date, reporting_name, role, transaction_type, acquisition, shares, price, url) VALUES (%s, '2026-10-19', '2026-10-15', 'Borders Ben', 'officer: PAO', 'F-InKind', 'D', 883, 342, 'https://www.sec.gov/x')", (cik,))
+        cur.execute("INSERT INTO holders (cik, quarter_end, investor, shares, market_value, change_pct, ownership_pct) VALUES (%s, '2026-06-30', 'BLACKROCK, INC.', 1162996939, 336524794350, 1.5988, 7.9156)", (cik,))
+        cur.execute("INSERT INTO ticker_facts (cik, key, value) VALUES (%s, 'ratings', %s), (%s, 'fmp_crosscheck', %s), (0, 'treasury_10y', %s) ON CONFLICT (cik, key) DO UPDATE SET value = EXCLUDED.value",
+                    (cik, J({"date": "2026-10-01", "strong_buy": 6, "buy": 19, "hold": 13, "sell": 3, "strong_sell": 3}),
+                     cik, J({"checked": "2026-10-19", "ok": 9, "total": 10, "rows": [{"metric": "pe", "ours": 39.4, "fmp": 39.1, "diff": 0.007, "ok": True}, {"metric": "ev_ebitda", "ours": 30.0, "fmp": 24.0, "diff": 0.25, "ok": False}]}),
+                     J({"date": "2026-10-16", "year10": 5.09})))
+    conn.commit()
+
+
+@pytest.mark.db
+async def test_page_sections_fmp(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    seed_prices(db_conn)
+    seed_fmp(db_conn)
+    with db_conn.cursor() as cur:  # metrics the snapshot would carry after prepare()
+        cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); sid = cur.fetchone()[0]
+        for mid, val, name in (("seg_iphone_share", 0.86, "iPhone"), ("seg_iphone_yoy", 0.042, "iPhone"), ("seg_mac_share", 0.14, "Mac"), ("seg_mac_yoy", 0.124, "Mac")):
+            cur.execute("INSERT INTO metrics (snapshot_id, metric_id, period, value, unit, formula_id, inputs, flags) VALUES (%s, %s, 'FY2025', %s, 'ratio', 'fmp:revenue-product-segmentation', %s, '[\"vendor_fmp\"]')",
+                        (sid, mid, val, json.dumps({"name": name})))
+        for mid, val in (("pe_peer_median", 18.5), ("pe_vs_peer_median", 2.13), ("dividend_yield", 0.0031), ("dividend_per_share_ttm", 1.06), ("altman_z", 13.5), ("piotroski", 9), ("risk_free_10y", 0.0509)):
+            cur.execute("INSERT INTO metrics (snapshot_id, metric_id, period, value, unit, formula_id, inputs, flags) VALUES (%s, %s, 'current', %s, 'ratio', 'fmp:x', '{}', '[\"vendor_fmp\"]') "
+                        "ON CONFLICT (snapshot_id, metric_id, period) DO UPDATE SET value = EXCLUDED.value, null_reason = NULL", (sid, mid, val))
+    db_conn.commit()
+    r = client.get("/t/AAPL?window=90")
+    assert r.status_code == 200
+    for needle in ("Apple Inc. · Technology · Consumer Electronics · 166,000 employees", "Peers", "SONY", "18.5", "Revenue segments", "iPhone", "86", "+4.2%", "Ownership",
+                   "BLACKROCK, INC.", "Borders Ben", "Scores and ratings", "Altman Z", "13.5", "Piotroski", "buy 19", "Cross-check", "9 of 10 within 10%", "ev_ebitda", "10-year Treasury 5.09%", "Dividend", "1.06"):
+        assert needle in r.text, needle
+
+
+@pytest.mark.db
+def test_page_without_fmp_data(client, db_conn):
+    seed_watch(db_conn)
+    seed_prices(db_conn)
+    r = client.get("/t/AAPL")
+    assert r.status_code == 200 and "Peers" in r.text and "no peer data" in r.text.lower() and "no segment data" in r.text.lower() and "cross-check" in r.text.lower()
+
+
+@pytest.mark.db
+def test_overview_quotes(client, db_conn, monkeypatch):
+    from fundabot.web import views
+
+    seed_watch(db_conn)
+    seed_prices(db_conn)
+    monkeypatch.setattr(views, "live_quotes", lambda conn, tickers: {"AAPL": {"price": 342.94, "change_pct": -0.1514, "year_high": 348.15, "year_low": 243.42}})
+    r = client.get("/")
+    assert r.status_code == 200 and "342.94" in r.text and "-0.15%" in r.text and "day" in r.text

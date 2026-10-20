@@ -1,0 +1,7 @@
+<h3>Peers <span class="muted">(FMP peer set, US listings)</span></h3>
+{% if peer_rows %}
+<table class="list"><thead><tr><th>company</th><th>market cap</th><th>P/E TTM</th><th>EV/sales TTM</th><th>EV/EBITDA TTM</th></tr></thead><tbody>
+{% for p in peer_rows %}<tr class="{{ 'own' if p.own }}"><td>{{ p.peer }}{% if p.name %} <span class="muted">{{ p.name }}</span>{% endif %}</td><td>{{ (p.market_cap / 1e9)|num(1) if p.market_cap else "n/a" }}B</td><td>{{ p.pe_ttm|num(1) if p.pe_ttm else "n/a" }}</td><td>{{ p.ev_sales_ttm|num(1) if p.ev_sales_ttm else "n/a" }}</td><td>{{ p.ev_ebitda_ttm|num(1) if p.ev_ebitda_ttm else "n/a" }}</td></tr>{% endfor %}
+</tbody></table>
+<p class="muted">peer median P/E {{ peer_medians.pe_peer_median|num(1) if peer_medians.pe_peer_median else "n/a" }} · ours vs median {{ peer_medians.pe_vs_peer_median|num if peer_medians.pe_vs_peer_median else "n/a" }}x · EV/sales median {{ peer_medians.ev_sales_peer_median|num(1) if peer_medians.ev_sales_peer_median else "n/a" }}</p>
+{% else %}<p class="muted">No peer data.</p>{% endif %}

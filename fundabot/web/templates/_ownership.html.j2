@@ -1,0 +1,10 @@
+<h3>Ownership</h3>
+{% if ownership %}<ul class="plain">{% for line in ownership %}<li><code>{{ line }}</code></li>{% endfor %}</ul>{% endif %}
+{% if holders %}<p class="muted">Top holders ({{ holders[0].quarter_end }}, 13F)</p>
+<table class="list"><thead><tr><th>holder</th><th>shares</th><th>value</th><th>change</th><th>of company</th></tr></thead><tbody>
+{% for h in holders %}<tr><td>{{ h.investor }}</td><td>{{ (h.shares / 1e6)|num(1) if h.shares else "n/a" }}M</td><td>{{ (h.market_value / 1e9)|num(1) if h.market_value else "n/a" }}B</td><td>{{ h.change_pct|num(1) if h.change_pct is not none else "n/a" }}%</td><td>{{ h.ownership_pct|num(2) if h.ownership_pct is not none else "n/a" }}%</td></tr>{% endfor %}
+</tbody></table>{% else %}<p class="muted">No holder data.</p>{% endif %}
+{% if insider_trades %}<p class="muted">Latest insider transactions (Form 4)</p>
+<table class="list"><thead><tr><th>filed</th><th>who</th><th>type</th><th>shares</th><th>price</th></tr></thead><tbody>
+{% for t in insider_trades %}<tr><td>{{ t.filing_date }}</td><td>{{ t.reporting_name }} <span class="muted">{{ t.role or "" }}</span></td><td>{{ t.transaction_type }} ({{ "buy" if t.acquisition == "A" else "sell" if t.acquisition == "D" else t.acquisition }})</td><td>{{ t.shares|num(0) if t.shares is not none else "" }}</td><td>{{ t.price|num if t.price else "" }}{% if t.url %} <a href="{{ t.url }}" target="_blank" rel="noopener">form</a>{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% else %}<p class="muted">No insider transactions stored.</p>{% endif %}

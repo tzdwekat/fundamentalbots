@@ -22,3 +22,5 @@ ol.narrative li{margin-bottom:6px}ul.plain{list-style:none;padding:0}ul.plain li
 .drawer-box .close{position:absolute;right:10px;top:6px;cursor:pointer;font-size:18px}.excerpt{white-space:pre-wrap;font-size:13.5px}
 .job{padding:6px 10px;border-radius:6px;background:var(--pill);font-size:13px;margin-top:6px}.job.failed{color:var(--neg)}.job.refused{color:var(--warn)}
 blockquote{margin:8px 0;padding-left:10px;border-left:3px solid var(--line);color:var(--muted)}details summary{cursor:pointer;color:var(--muted);font-size:13px}.rule{font-size:13px;margin-top:-4px}
+
+.pos{color:var(--pos)}.neg{color:var(--neg)}tr.own td{font-weight:600}

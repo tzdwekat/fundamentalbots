@@ -1,0 +1,6 @@
+<h3>Revenue segments <span class="muted">(FMP, annual)</span></h3>
+{% if segments %}
+<table class="list"><thead><tr><th>segment</th><th>kind</th><th>FY</th><th>share</th><th>prior share</th><th>growth</th></tr></thead><tbody>
+{% for s in segments %}<tr><td>{{ s.name }}</td><td class="muted">{{ s.kind }}</td><td>{{ s.fy }}</td><td>{{ (s.share * 100)|num(0) if s.share is not none else "n/a" }}%</td><td>{{ (s.prev_share * 100)|num(0) if s.prev_share is not none else "n/a" }}%</td><td>{{ s.yoy|pct if s.yoy is not none else "n/a" }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="muted">No segment data.</p>{% endif %}

@@ -41,6 +41,12 @@ def fixture_prepare(monkeypatch, db_conn):
     monkeypatch.setattr(edgar_filings, "list_filings", lambda cik: filings)
     from fundabot.ingest import fmp
     monkeypatch.setattr(fmp, "fetch_transcript_dates", lambda t: [])  # no network; test_transcripts overrides
+    from fundabot.ingest import fmp_extra
+    for name in ("ingest_profile", "ingest_peers", "ingest_segments", "ingest_dividends", "ingest_volume", "ingest_insider_trades", "ingest_holders"):
+        monkeypatch.setattr(fmp_extra, name, lambda *a, **k: 0)  # FMP breadth: no network in tests
+    monkeypatch.setattr(fmp_extra, "fetch_scores", lambda *a, **k: None)
+    monkeypatch.setattr(fmp_extra, "fetch_treasury_10y", lambda *a, **k: None)
+    monkeypatch.setattr(fmp_extra, "fetch_ttm", lambda *a, **k: {})
     monkeypatch.setattr(edgar_filings, "extract_items", lambda acc, cik, form, filed, company="": (
         {"item1a": (FIX / "sections/aapl_10k_item1a.txt").read_text(), "item7": (FIX / "sections/aapl_10k_item7.txt").read_text()}, True))
     return db_conn
