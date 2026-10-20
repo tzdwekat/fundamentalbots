@@ -9,11 +9,11 @@ def test_migrations_idempotent(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     db_conn.commit()
-    assert run_migrations(db_conn) == ["001_init.sql", "002_splits.sql", "003_debate.sql", "004_phase4.sql", "005_outcome_scores.sql", "006_cached_tokens.sql", "007_webapp.sql", "008_grades.sql", "009_fmp_breadth.sql"]
+    assert run_migrations(db_conn) == ["001_init.sql", "002_splits.sql", "003_debate.sql", "004_phase4.sql", "005_outcome_scores.sql", "006_cached_tokens.sql", "007_webapp.sql", "008_grades.sql", "009_fmp_breadth.sql", "010_fmp_statements.sql"]
     assert run_migrations(db_conn) == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM schema_migrations")
-        assert cur.fetchone()[0] == 9
+        assert cur.fetchone()[0] == 10
 
 
 def test_test_database_name_is_separate():

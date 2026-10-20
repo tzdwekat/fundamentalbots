@@ -243,6 +243,55 @@ def load_holders(conn: psycopg.Connection, cik: int) -> list[dict]:
         return [{k: (_num(v) if k not in ("quarter_end", "investor") else v) for k, v in zip(cols, r)} for r in cur.fetchall()]
 
 
+# ---- financial statements (the primary source of the fundamentals series since Phase 5d)
+STATEMENTS = (("income", "income-statement"), ("balance", "balance-sheet-statement"), ("cashflow", "cash-flow-statement"))
+
+
+def fetch_statements(ticker: str, get=fmp.get, annual_limit: int = 12, quarter_limit: int = 24) -> dict[str, list[dict]]:
+    """Six lists keyed <statement>_<annual|quarter>; a statement that fails is logged and left empty; all failing raises."""
+    out, failures = {}, []
+    for key, path in STATEMENTS:
+        for period_type, limit in (("annual", annual_limit), ("quarter", quarter_limit)):
+            try:
+                out[f"{key}_{period_type}"] = get(path, symbol=_sym(ticker), period=period_type, limit=limit) or []
+            except fmp.FMPError as e:
+                log.warning("%s %s %s unavailable: %s", ticker, path, period_type, e)
+                out[f"{key}_{period_type}"] = []
+                failures.append(path)
+    if len(failures) == len(STATEMENTS) * 2:
+        raise fmp.FMPError(f"{ticker}: every statement endpoint failed")
+    return out
+
+
+def ingest_statements(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get, max_age_hours: float = 24, force: bool = False) -> int:
+    if not force and _fresh(conn, "fmp_statements", cik, max_age_hours):
+        return 0
+    data = fetch_statements(ticker, get)
+    _attempted(conn, "fmp_statements", cik)
+    n = 0
+    with conn.cursor() as cur:
+        for key, rows in data.items():
+            statement, period_type = key.split("_")
+            for r in rows:
+                if not r.get("date") or r.get("fiscalYear") in (None, ""):
+                    continue
+                cur.execute("INSERT INTO fmp_statements (cik, statement, period_type, fiscal_year, period, date, filing_date, data, fetched_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,now()) "
+                            "ON CONFLICT (cik, statement, period_type, fiscal_year, period) DO UPDATE SET date = EXCLUDED.date, filing_date = EXCLUDED.filing_date, data = EXCLUDED.data, fetched_at = now()",
+                            (cik, statement, period_type, int(r["fiscalYear"]), r["period"], date.fromisoformat(r["date"][:10]), date.fromisoformat(r["filingDate"][:10]) if r.get("filingDate") else None, Jsonb(r)))
+                n += 1
+    conn.commit()
+    return n
+
+
+def load_statements(conn: psycopg.Connection, cik: int) -> dict[str, list[dict]]:
+    out = {f"{k}_{pt}": [] for k, _ in STATEMENTS for pt in ("annual", "quarter")}
+    with conn.cursor() as cur:
+        cur.execute("SELECT statement, period_type, fiscal_year, period, date, filing_date, data FROM fmp_statements WHERE cik = %s ORDER BY date DESC, period DESC", (cik,))
+        for statement, period_type, fy, period, d, fd, data in cur.fetchall():
+            out[f"{statement}_{period_type}"].append({**data, "fiscal_year": fy, "period": period, "date": d, "filing_date": fd})
+    return out
+
+
 # ---- small facts, cached in ticker_facts
 def fact(conn: psycopg.Connection, cik: int, key: str, loader, max_age_hours: float):
     """Cached loader result; a loader failure logs and returns the stored value (or None)."""

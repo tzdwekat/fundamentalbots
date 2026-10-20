@@ -144,3 +144,36 @@ def test_empty_result_counts_as_fresh(db_conn):
     assert fmp_extra.ingest_dividends(db_conn, 1, "NOPAY", get=get) == 0 and calls.count("dividends") == 1  # an empty answer is remembered for the refresh window
     assert fmp_extra.ingest_profile(db_conn, 1, "NOPAY", get=get) is False and fmp_extra.ingest_profile(db_conn, 1, "NOPAY", get=get) is False and calls.count("profile") == 1
     assert fmp_extra.ingest_peers(db_conn, 1, "NOPAY", get=get) == 0 and fmp_extra.ingest_peers(db_conn, 1, "NOPAY", get=get) == 0 and calls.count("stock-peers") == 1
+
+
+def statements_get(path, **params):
+    key = {"income-statement": "income", "balance-sheet-statement": "balance", "cash-flow-statement": "cashflow"}[path]
+    return fx(f"{key}_{'annual' if params['period'] == 'annual' else 'quarter'}")
+
+
+@pytest.mark.db
+def test_statements_roundtrip(db_conn):
+    n = fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=statements_get)
+    st = fmp_extra.load_statements(db_conn, 320193)
+    assert set(st) == {"income_annual", "income_quarter", "balance_annual", "balance_quarter", "cashflow_annual", "cashflow_quarter"} and n == sum(len(v) for v in st.values())
+    inc = st["income_annual"]
+    assert len(inc) == 8 and inc[0]["fiscal_year"] == 2025 and inc[0]["period"] == "FY" and inc[0]["revenue"] == 416161000000 and inc[0]["date"] == date(2025, 9, 27) and inc[0]["filing_date"] == date(2025, 10, 31)
+    assert st["income_quarter"][0]["period"] == "Q3" and st["income_quarter"][0]["fiscal_year"] == 2026 and inc[0]["fiscal_year"] > inc[1]["fiscal_year"]
+    assert fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=statements_get) == 0  # fresh
+    assert fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=statements_get, force=True) == n
+
+
+@pytest.mark.db
+def test_statements_partial_failure(db_conn):
+    def get(path, **params):
+        if path == "cash-flow-statement":
+            raise fmp_extra.fmp.FMPError("cash-flow-statement: 500")
+        return statements_get(path, **params)
+    assert fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=get) > 0
+    st = fmp_extra.load_statements(db_conn, 320193)
+    assert st["income_annual"] and st["balance_quarter"] and st["cashflow_annual"] == [] and st["cashflow_quarter"] == []
+
+    def all_fail(path, **params):
+        raise fmp_extra.fmp.FMPError("down")
+    with pytest.raises(fmp_extra.fmp.FMPError):
+        fmp_extra.fetch_statements("AAPL", get=all_fail)
