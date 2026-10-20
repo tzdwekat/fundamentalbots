@@ -61,5 +61,5 @@ def format_table(metrics: list[Metric]) -> str:
         if rows:
             out.append(f"\n== {group} ==")
             out.append(pd.DataFrame(rows, columns=["metric"] + cols).to_string(index=False))
-    out.append("\n* = flagged (restated, derived, out_of_bounds, partial data); see --json for details")
+    out.append("\n* = flagged (restated, derived, out_of_bounds, source_conflict, partial data); see --json for details")
     return "\n".join(out)

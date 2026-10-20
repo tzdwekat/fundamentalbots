@@ -52,7 +52,7 @@ Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
 {% endfor %}
 ## Metrics
 
-Flags: `*` = restated, derived, out_of_bounds or partial data (see the sources appendix for each metric's inputs).
+Flags: `*` = restated, derived, out_of_bounds, source_conflict (FMP and the filing disagree; the filed value is shown) or partial data (see the sources appendix for each metric's inputs).
 
 {% for group, rows in metric_groups %}
 ### {{ group }}

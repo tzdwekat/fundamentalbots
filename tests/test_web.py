@@ -291,8 +291,11 @@ async def test_evidence_metric_links_filing_and_shows_source(client, db_conn, fi
     await full_run(db_conn, tmp_path)
     with db_conn.cursor() as cur:
         cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); sid = cur.fetchone()[0]
+    with db_conn.cursor() as cur:  # an agent-filed company: the folder is the company's CIK, not the accession prefix
+        cur.execute("UPDATE filings SET primary_doc_url = 'https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm' WHERE accession = '0000320193-25-000079'")
+    db_conn.commit()
     r = client.get(f"/evidence/{sid}/metric:revenue@FY2025")
-    assert r.status_code == 200 and "source" in r.text.lower() and "xbrl:" in r.text and "sec.gov" in r.text and "0000320193-25-000079" in r.text
+    assert r.status_code == 200 and "source" in r.text.lower() and "xbrl:" in r.text and "aapl-20250927.htm" in r.text and "0000320193-25-000079" in r.text
     r2 = client.get(f"/evidence/{sid}/metric:revenue@Q4FY2025")
     assert "fmp:income:revenue" in r2.text
 
@@ -309,3 +312,7 @@ def test_page_shows_edgar_crosscheck(client, db_conn):
     db_conn.commit()
     r = client.get("/t/AAPL")
     assert "FMP vs EDGAR" in r.text and "41 of 42" in r.text and "short_term_debt@FY2025" in r.text
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE ticker_facts SET value = %s WHERE key = 'edgar_crosscheck'", (J({"checked": "2026-10-19", "ok": 0, "total": 0, "rows": []}),))
+    db_conn.commit()
+    assert "0 of 0" not in client.get("/t/AAPL").text

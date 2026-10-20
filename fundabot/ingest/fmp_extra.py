@@ -272,6 +272,8 @@ def ingest_statements(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.g
     with conn.cursor() as cur:
         for key, rows in data.items():
             statement, period_type = key.split("_")
+            if rows:  # a re-labelled or dropped period must not leave a stale row behind
+                cur.execute("DELETE FROM fmp_statements WHERE cik = %s AND statement = %s AND period_type = %s", (cik, statement, period_type))
             for r in rows:
                 if not r.get("date") or r.get("fiscalYear") in (None, ""):
                     continue

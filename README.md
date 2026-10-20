@@ -163,7 +163,8 @@ value, flagged `source_conflict` with FMP's figure attached, visible to the agen
 Every metric's formula names its source (`xbrl:Revenues`, `fmp:income:revenue`); the evidence drawer shows it with a
 link to the filing. An FMP zero is a missing line, never a value. `fundabot verify T` prints yfinance, FMP-TTM and
 FMP-vs-EDGAR checks; on AAPL 266 of 293 statement lines agree, and the 27 that do not are FMP's broader debt definition
-(commercial paper and leases) plus one FMP cash figure, all kept on the filed value (docs/handcheck-2026-10.md).
+(commercial paper and leases; 24 lines), two intangibles quarters and one FMP cash figure, all kept on the filed value
+(docs/handcheck-2026-10.md).
 
 See `docs/handcheck-2026-10.md` for the 20-ticker check and `docs/superpowers/specs/` for the period and tag rules.
 Metrics are never guessed: a missing line item is `null` with a reason. Derived values (Q4 = FY - Q1..Q3, Q2/Q3 from

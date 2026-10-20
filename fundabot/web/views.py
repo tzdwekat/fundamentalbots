@@ -293,9 +293,9 @@ def evidence(conn, sid: str, eid: str) -> dict | None:
         url = filed = None
         if acc and not str(acc).startswith("fmp:"):
             with conn.cursor() as cur:
-                cur.execute("SELECT form, filed FROM filings WHERE accession = %s", (acc,))
+                cur.execute("SELECT form, filed, primary_doc_url FROM filings WHERE accession = %s", (acc,))
                 row = cur.fetchone()
-            url = f"https://www.sec.gov/Archives/edgar/data/{str(acc).split('-')[0].lstrip('0')}/{str(acc).replace('-', '')}/"
+            url = (row[2] if row and row[2] else None) or f"https://www.sec.gov/Archives/edgar/data/{str(acc).split('-')[0].lstrip('0')}/{str(acc).replace('-', '')}/"  # the stored url carries the company CIK; the accession prefix is the filer agent's
             filed = f"{row[0]} filed {row[1]}" if row else acc
         elif acc:
             filed = f"filed {str(acc)[4:]} (FMP)"

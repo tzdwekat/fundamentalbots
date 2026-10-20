@@ -143,3 +143,19 @@ def test_formula_names_source():
     assert q4.formula_id == "fmp:income:revenue" and "derived" not in q4.flags  # EDGAR derives Q4; FMP reports it
     assert ms["gross_margin@FY2025"].value == pytest.approx(195200000000 / 416161000000, rel=1e-4)  # EDGAR wins on agreement; FMP rounds to the million
     assert ms["interest_expense@FY2023"].formula_id.startswith("xbrl:")
+
+
+def test_fmp_q4_share_count_equal_to_the_year_is_dropped():
+    s = FS.build_fmp_series(statements(), None)
+    sh = s["diluted_shares"]
+    assert "Q4FY2025" not in set(sh.period)  # FMP's newest Q4 share count is the annual average, not the quarter's
+    assert "Q4FY2024" in set(sh.period) and "Q3FY2025" in set(sh.period)
+
+
+def test_string_zero_and_junk_are_missing_lines():
+    st = statements()
+    st["income_annual"][0]["interestExpense"] = "0"
+    st["income_annual"][0]["revenue"] = "n/a"
+    s = FS.build_fmp_series(st, None)
+    assert "FY2025" not in set(s["interest_expense"].period) if "interest_expense" in s else True
+    assert "FY2025" not in set(s["revenue"].period) and "FY2024" in set(s["revenue"].period)

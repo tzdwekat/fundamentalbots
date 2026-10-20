@@ -1,5 +1,11 @@
 # Fundabot Phase 5d: FMP statements as the primary source, EDGAR as the fallback
 
+> **Superseded on 2026-10-19 during execution.** Tariq: "use the more reliable source wherever available." The merge is
+> per value, not FMP-primary: only one source has it → that one; EDGAR's row is derived → FMP's reported figure; both
+> reported and within 2 % → the filed EDGAR value, confirmed; both reported and apart → the filed value, flagged
+> `source_conflict` with FMP's figure attached. Goal 3 below describes the original FMP-primary merge; the code,
+> tests, README and hand-check describe the per-value rule.
+
 2026-10-19. Tariq: "FMP is trustworthy as well so use that as the primary and EDGAR as the secondary." Until now the
 fundamentals came from EDGAR XBRL company facts (tag map, YTD derivation, restatement and split handling) and FMP was
 a cross-check. This phase inverts that: FMP's standardised income, balance-sheet and cash-flow statements build the

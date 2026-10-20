@@ -177,3 +177,15 @@ def test_statements_partial_failure(db_conn):
         raise fmp_extra.fmp.FMPError("down")
     with pytest.raises(fmp_extra.fmp.FMPError):
         fmp_extra.fetch_statements("AAPL", get=all_fail)
+
+
+@pytest.mark.db
+def test_statements_relabel_replaces_stale_rows(db_conn):
+    fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=statements_get)
+
+    def relabelled(path, **params):
+        rows = statements_get(path, **params)
+        return [{**r, "fiscalYear": str(int(r["fiscalYear"]) + 1)} for r in rows]  # FMP shifts every label by one year
+    fmp_extra.ingest_statements(db_conn, 320193, "AAPL", get=relabelled, force=True)
+    inc = fmp_extra.load_statements(db_conn, 320193)["income_annual"]
+    assert len(inc) == 8 and len({r["date"] for r in inc}) == 8 and max(r["fiscal_year"] for r in inc) == 2026  # no phantom year from the old labels

@@ -14,7 +14,7 @@ HARD_RULES = """Hard rules:
 2. Never state a number that is not in the inputs. Do not compute new numbers; quote the metric by id instead.
 3. If the inputs do not support a judgement, write "insufficient data" rather than guess. Do not use anything you
    remember about this company from outside the inputs: no prior-year figures, no executives, no news.
-4. Metrics marked with flags (restated, derived, out_of_bounds) are less reliable; say so when you use them.
+4. Metrics marked with flags (restated, derived, out_of_bounds, source_conflict = FMP and the filing disagree, the filed value is shown) are less reliable; say so when you use them.
 5. A null metric means the data is unavailable for the stated reason, not that the value is zero."""
 
 OUTPUT_GUIDE = """Output: a JSON object with fields thesis (one paragraph), claims (each with text, evidence ids, direction

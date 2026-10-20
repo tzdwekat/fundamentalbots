@@ -48,7 +48,11 @@ def _rows(statements: dict, statement: str, field: str, absolute: bool, filings)
                 continue
             start = (prev_end + timedelta(days=1)) if prev_end and (end - prev_end).days <= (400 if fq == 0 else 100) else end - timedelta(days=364 if fq == 0 else 91)
             prev_end = end
-            if v in (None, 0, 0.0, ""):
+            try:
+                v = float(v) if v not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                v = 0.0  # a non-numeric cell is a missing line too
+            if v == 0.0:
                 continue  # FMP writes 0 for lines the filer does not report: not a value
             fd = r.get("filing_date")
             fd = fd if isinstance(fd, date) or fd is None else date.fromisoformat(str(fd)[:10])
@@ -68,6 +72,9 @@ def build_fmp_series(statements: dict[str, list[dict]], filings: pd.DataFrame | 
         if not rows:
             continue
         df = pd.DataFrame(rows)
+        if item == "diluted_shares":  # FMP's newest Q4 share count is the annual average copied over, not the quarter's
+            fy_vals = {r["fy"]: r["value"] for r in rows if r["fq"] == 0}
+            df = df[~((df.fq == 4) & (df.fy.map(fy_vals) == df.value))]
         df["tag"] = tag
         df["split_adjusted"] = item in SPLIT_ADJUSTED
         df["period"] = [f"FY{fy}" if fq == 0 else f"Q{fq}FY{fy}" for fy, fq in zip(df.fy, df.fq)]
