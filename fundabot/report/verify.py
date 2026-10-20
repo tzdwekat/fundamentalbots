@@ -43,3 +43,49 @@ def cross_check(ticker: str, metrics: list[Metric], tolerance: float = 0.02) -> 
 
 def _period_end(m: Metric):
     return date.fromisoformat(m.inputs["end"])
+
+
+FMP_TTM = {  # our comparison id -> FMP TTM key
+    "pe": "priceToEarningsRatioTTM", "ev_sales": "evToSalesTTM", "ev_ebitda": "evToEBITDATTM", "fcf_yield": "freeCashFlowYieldTTM",
+    "gross_margin_ttm": "grossProfitMarginTTM", "operating_margin_ttm": "operatingProfitMarginTTM", "net_margin_ttm": "netProfitMarginTTM",
+    "sbc_to_revenue_ttm": "stockBasedCompensationToRevenueTTM", "net_debt_to_ebitda_ttm": "netDebtToEBITDATTM", "current_ratio": "currentRatioTTM",
+}
+
+
+def _latest_quarters(metrics: list[Metric], mid: str, n: int = 4) -> list[float] | None:
+    rows = sorted((m for m in metrics if m.metric_id == mid and m.period.startswith("Q") and m.value is not None), key=lambda m: (int(m.period[4:]), int(m.period[1])))
+    return [float(m.value) for m in rows[-n:]] if len(rows) >= n else None
+
+
+def _ttm_ratio(metrics: list[Metric], num: str, den: str = "revenue") -> float | None:
+    a, b = _latest_quarters(metrics, num), _latest_quarters(metrics, den)
+    return (sum(a) / sum(b)) if a and b and sum(b) else None
+
+
+def _latest_q(metrics: list[Metric], mid: str) -> float | None:
+    rows = _latest_quarters(metrics, mid, 1)
+    return rows[0] if rows else None
+
+
+def crosscheck_fmp(metrics: list[Metric], ttm: dict, tolerance: float = 0.10) -> list[dict]:
+    """Our values against FMP's TTM figures, like with like; reports only, never writes. ok is None when either side is missing."""
+    cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
+    ebitda = _latest_quarters(metrics, "ebitda")
+    ours = {"pe": cur.get("pe"), "ev_sales": cur.get("ev_sales"), "ev_ebitda": cur.get("ev_ebitda"), "fcf_yield": cur.get("fcf_yield"),
+            "gross_margin_ttm": _ttm_ratio(metrics, "gross_profit"), "operating_margin_ttm": _ttm_ratio(metrics, "operating_income"),
+            "net_margin_ttm": _ttm_ratio(metrics, "net_income"), "sbc_to_revenue_ttm": _ttm_ratio(metrics, "sbc"),
+            "net_debt_to_ebitda_ttm": (_latest_q(metrics, "net_debt") / sum(ebitda)) if ebitda and sum(ebitda) and _latest_q(metrics, "net_debt") is not None else None,
+            "current_ratio": _latest_q(metrics, "current_ratio")}
+    rows = []
+    for mid, key in FMP_TTM.items():
+        mine, theirs = ours.get(mid), ttm.get(key)
+        diff = (mine / theirs - 1) if mine is not None and theirs not in (None, 0) else None
+        rows.append({"metric": mid, "ours": mine, "fmp": theirs, "diff": diff, "ok": None if diff is None else abs(diff) <= tolerance})
+    return rows
+
+
+def format_crosscheck(rows: list[dict]) -> str:
+    def f(v):
+        return "" if v is None else f"{v:,.4f}" if abs(v) < 10 else f"{v:,.2f}"
+    table = [(r["metric"], f(r["ours"]), f(r["fmp"]), "" if r["diff"] is None else f"{r['diff']:+.1%}" + ("" if r["ok"] else "  <-- CHECK")) for r in rows]
+    return pd.DataFrame(table, columns=["metric", "fundabot", "fmp_ttm", "diff"]).to_string(index=False)

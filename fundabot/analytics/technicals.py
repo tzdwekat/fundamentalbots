@@ -66,12 +66,19 @@ def largest_moves(closes: pd.DataFrame, window_days: int, n: int = 10, asof: dat
     if len(df) < 2:
         return []
     start = df.date.iloc[-1] - timedelta(days=window_days)
+    vols = df["volume"] if "volume" in df.columns else None
     rows = []
     for i in range(1, len(df)):
         if df.date[i] < start:
             continue
         ret = float(df.close[i]) / float(df.close[i - 1]) - 1
-        rows.append({"id": f"price:{df.date[i]}", "date": df.date[i], "close": float(df.close[i]), "ret": ret})
+        volume = rel = None
+        if vols is not None and pd.notna(vols.iloc[i]):
+            volume = int(vols.iloc[i])
+            prev = vols.iloc[max(0, i - 20):i]
+            if len(prev) == 20 and prev.notna().all() and float(prev.mean()) > 0:
+                rel = volume / float(prev.mean())  # volume against the trailing 20-day average
+        rows.append({"id": f"price:{df.date[i]}", "date": df.date[i], "close": float(df.close[i]), "ret": ret, "volume": volume, "rel_volume": rel})
     return sorted(rows, key=lambda r: -abs(r["ret"]))[:n]
 
 

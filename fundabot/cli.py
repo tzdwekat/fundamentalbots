@@ -59,15 +59,19 @@ def metrics(ticker: str, json_out: bool = typer.Option(False, "--json"), force: 
 
 @app.command()
 def verify(ticker: str):
-    """Cross-check revenue, net income, total assets and OCF against yfinance statements."""
+    """Cross-check FY values against yfinance statements and TTM ratios against FMP (two independent sources)."""
     from fundabot.db.session import connect
+    from fundabot.ingest import fmp_extra
     from fundabot.orchestrate import snapshot
     from fundabot.orchestrate.pipeline import prepare
-    from fundabot.report.verify import cross_check
+    from fundabot.report.verify import cross_check, crosscheck_fmp, format_crosscheck
 
     conn = connect()
     sid = prepare(conn, ticker)
-    typer.echo(cross_check(ticker, snapshot.load_metrics(conn, sid)))
+    metrics = snapshot.load_metrics(conn, sid)
+    typer.echo(cross_check(ticker, metrics))
+    typer.echo("\nFMP TTM cross-check (10% tolerance; a mismatch means look, not that ours is wrong):")
+    typer.echo(format_crosscheck(crosscheck_fmp(metrics, fmp_extra.fetch_ttm(ticker))))
 
 
 JUDGE_MAX_TOKENS = 20000  # a judge scores every surviving claim (70+ on a full run) with notes

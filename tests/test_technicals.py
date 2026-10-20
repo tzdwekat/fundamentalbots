@@ -133,3 +133,14 @@ def test_outlook_peer_fallback():
     ms2 = [m for m in ms if m.metric_id != "pe_vs_peer_median"]
     o2 = T.outlook(stats(), ms2)
     assert o2["components"]["valuation"]["state"] == "cheap" and o2["components"]["valuation"]["basis"] == "ev_sales_vs_peer_median" and o2["label"] == "growing / fair"
+
+
+def test_largest_moves_relative_volume():
+    df = series(60)
+    df["volume"] = 1_000_000
+    df.loc[40:, "close"] *= 0.95
+    df.loc[40, "volume"] = 3_000_000
+    moves = T.largest_moves(df, window_days=40, n=1)
+    assert moves[0]["date"] == df.date[40] and moves[0]["volume"] == 3_000_000 and moves[0]["rel_volume"] == pytest.approx(3.0)
+    no_vol = T.largest_moves(series(60), window_days=40, n=1)
+    assert no_vol[0]["volume"] is None and no_vol[0]["rel_volume"] is None

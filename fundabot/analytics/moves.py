@@ -57,7 +57,8 @@ def build_message(inputs: dict) -> str:
         lines.append(f"{k} = {_pct(v) if k in PCT else v}")
     lines += ["", "LARGEST_MOVES (daily, with events within two trading days)"]
     for m in inputs["moves"]:
-        lines.append(f"{m['id']}: {_pct(m['ret'])} to {m['close']:.2f}")
+        vol = f" on {m['rel_volume']:.1f}x average volume" if m.get("rel_volume") else ""
+        lines.append(f"{m['id']}: {_pct(m['ret'])} to {m['close']:.2f}{vol}")
         for e in m.get("events", []):
             lines.append(f"    {e.id} ({e.kind}, {e.date}): {e.title}")
     lines += ["", "NEWS (id, date, publisher, title, start of text)"]

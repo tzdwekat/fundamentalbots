@@ -161,6 +161,11 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
     shares = cur["shares_outstanding"].value if "shares_outstanding" in cur else None
     sid = snapshot.create_snapshot(conn, ticker, cik, fetch_id, accessions, price_date, close, shares)
     snapshot.store_metrics(conn, sid, fundamentals + val + earn + guid + fmp_m)
+    from fundabot.report.verify import crosscheck_fmp
+
+    ttm = fmp_extra.fact(conn, cik, "ttm", lambda: fmp_extra.fetch_ttm(ticker), 24) or {}
+    rows = crosscheck_fmp(fundamentals + val + fmp_m, ttm) if ttm else []
+    fmp_extra.fact(conn, cik, "fmp_crosscheck", lambda: {"checked": as_of.isoformat(), "rows": rows, "ok": sum(1 for r in rows if r["ok"]), "total": sum(1 for r in rows if r["ok"] is not None)}, 0)
     snapshot.store_flags(conn, sid, flags)
     return sid
 

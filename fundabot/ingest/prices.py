@@ -33,9 +33,10 @@ def ingest(conn: psycopg.Connection, cik: int, ticker: str) -> date | None:
 
 def load(conn: psycopg.Connection, cik: int) -> pd.DataFrame:
     with conn.cursor() as cur:
-        cur.execute("SELECT date, close FROM prices WHERE cik = %s ORDER BY date", (cik,))
-        df = pd.DataFrame(cur.fetchall(), columns=["date", "close"])
+        cur.execute("SELECT date, close, volume FROM prices WHERE cik = %s ORDER BY date", (cik,))
+        df = pd.DataFrame(cur.fetchall(), columns=["date", "close", "volume"])
     df["close"] = df["close"].astype(float)
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")  # None where FMP volume has not been joined yet
     return df
 
 

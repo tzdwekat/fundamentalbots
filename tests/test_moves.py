@@ -104,3 +104,10 @@ def test_earnings_block_uses_earnings_ids_only():
     inp["metrics"] = METRICS + [Metric("seg_iphone_share", "FY2025", 0.5, "ratio", "fmp:revenue-product-segmentation", {}, ["vendor_fmp"])]
     block = moves.build_message(inp).split("EARNINGS")[1].split("EXCERPTS")[0]
     assert "eps_surprise" in block and "revenue_yoy" in block and "seg_iphone" not in block
+
+
+def test_move_lines_mention_volume():
+    inp = inputs()
+    inp["moves"] = [{**MOVES[0], "volume": 90_000_000, "rel_volume": 2.3}]
+    assert "on 2.3x average volume" in moves.build_message(inp)
+    assert "average volume" not in moves.build_message(inputs())
