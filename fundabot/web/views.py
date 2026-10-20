@@ -177,7 +177,7 @@ def panel_for(conn, ticker: str) -> dict | None:
             cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,))
             return _panel_from_verdict(conn, ticker, sid, cur.fetchone()[0])
     with conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT a.snapshot_id FROM analyses a JOIN snapshots s ON s.id = a.snapshot_id WHERE s.ticker = %s AND a.status = 'ok' ORDER BY a.snapshot_id DESC LIMIT 1", (ticker.upper(),))
+        cur.execute("SELECT s.id FROM snapshots s WHERE s.ticker = %s AND EXISTS (SELECT 1 FROM analyses a WHERE a.snapshot_id = s.id AND a.status = 'ok') ORDER BY s.created_at DESC LIMIT 1", (ticker.upper(),))
         row = cur.fetchone()
     return _panel_from_analyses(conn, ticker, row[0]) if row else None
 
@@ -195,7 +195,13 @@ def narrative_inputs(conn, ticker: str, cik: int, window_days: int, with_chunks:
     stats = stats if stats is not None else stats_with_benchmark(px, _spy(conn))
     asof = stats.get("asof") or date.today()
     start = asof - timedelta(days=window_days)
-    events = technicals.events_for(conn, cik, ticker, start, asof, list_filings=list_filings)
+    def filings_or_empty(c):
+        try:
+            return list_filings(c)
+        except Exception as e:  # EDGAR down: the page renders without filing markers rather than failing
+            log.warning("%s: EDGAR submissions unavailable: %s", ticker, e)
+            return pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"])
+    events = technicals.events_for(conn, cik, ticker, start, asof, list_filings=filings_or_empty)
     mv = technicals.match_events(technicals.largest_moves(px, window_days), events, list(px.date))
     items = news.load(conn, cik, window_days, until=asof)
     chunks = []

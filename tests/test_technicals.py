@@ -106,3 +106,19 @@ def test_events_include_grade_changes_only(db_conn):
         cur.execute("INSERT INTO grades (cik, date, company, previous_grade, new_grade, action) VALUES (1, '2026-07-02', 'JP Morgan', 'Neutral', 'Overweight', 'upgrade'), (1, '2026-07-03', 'Needham', 'Hold', 'Hold', 'maintain')")
     events = T.events_for(db_conn, 1, "X", date(2026, 7, 1), date(2026, 7, 31), list_filings=lambda c: pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"]))
     assert [e.id for e in events] == ["grade:2026-07-02:JP Morgan"] and events[0].title == "JP Morgan: Neutral -> Overweight (upgrade)"
+
+
+def test_52_week_fields_need_a_year():
+    s = T.price_stats(series(120))
+    assert s["high_52w"] is None and s["low_52w"] is None and s["drawdown_52w"] is None and s["dist_52w_low"] is None
+    assert T.price_stats(series(300))["high_52w"] is not None
+
+
+def test_every_rule_label_is_reachable():
+    labels = {label for label, _ in T.RULES}
+    seen = set()
+    for m in ("accelerating", "steady", "decelerating"):
+        for t in ("up", "down", "turning_up", "mixed"):
+            for v in ("stretched", "fair", "cheap"):
+                seen.add(next(label for label, pred in T.RULES if pred(m, t, v)))
+    assert seen == labels

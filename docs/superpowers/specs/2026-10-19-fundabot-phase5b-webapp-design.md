@@ -51,7 +51,7 @@ replace the CLI.
    - Trend: the price picture's moving-average position, slope and drawdown from the 52-week high.
    - Label from a fixed rule table (in code, with the rule shown on hover): `growing / extended`, `growing / fair`,
      `decelerating`, `declining`, `bottoming` (price below the 200-day average, 50-day slope turned positive, drawdown
-     > 20%), `recovering`, `insufficient data`. No price targets, no forecasts, no model involvement.
+     > 20%), `insufficient data`. No price targets, no forecasts, no model involvement.
 5. **Decision panel.** From the latest `full` verdict (or the latest cheap run's analyses when there is no verdict):
    composite score with the veto note, bull column (positive consensus claims, strongest first) and bear column
    (negative consensus claims and contested claims with their refutations), each claim with its evidence ids as links

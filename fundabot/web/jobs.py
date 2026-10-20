@@ -21,7 +21,7 @@ class JobRefused(Exception):
 
 def running() -> dict[int, dict]:
     with _lock:
-        return {k: {"ticker": v["ticker"], "kind": v["kind"]} for k, v in _running.items()}
+        return {k: {"ticker": v["ticker"], "kind": v["kind"]} for k, v in _running.items() if isinstance(k, int)}
 
 
 def running_for(ticker: str) -> int | None:
@@ -33,29 +33,37 @@ def start(kind: str, ticker: str, profile: str) -> int:
     ticker = ticker.upper()
     if kind not in KINDS:
         raise JobRefused(f"unknown job kind {kind}")
-    conn = connect()
+    placeholder = object()
+    with _lock:  # reserve the slot before any DB round-trip so a double click cannot start two runs
+        if any(v["ticker"] == ticker for v in _running.values()):
+            raise JobRefused(f"a job for {ticker} is already running")
+        if len(_running) >= MAX_RUNNING:
+            raise JobRefused(f"{MAX_RUNNING} jobs are already running; try again in a few minutes")
+        _running[placeholder] = {"ticker": ticker, "kind": kind, "thread": None}
     try:
-        with _lock:
-            if any(v["ticker"] == ticker for v in _running.values()):
-                raise JobRefused(f"a job for {ticker} is already running")
-            if len(_running) >= MAX_RUNNING:
-                raise JobRefused(f"{MAX_RUNNING} jobs are already running; try again in a few minutes")
-        if kind != "refresh":
+        conn = connect()
+        try:
+            if kind != "refresh":
+                with conn.cursor() as cur:
+                    cur.execute("SELECT status FROM run_queue WHERE ticker = %s AND status IN ('queued', 'started') LIMIT 1", (ticker,))
+                    if cur.fetchone():
+                        raise JobRefused(f"the worker has {ticker} queued or running; wait for it or let it finish")
             with conn.cursor() as cur:
-                cur.execute("SELECT status FROM run_queue WHERE ticker = %s AND status IN ('queued', 'started') LIMIT 1", (ticker,))
-                if cur.fetchone():
-                    raise JobRefused(f"the worker has {ticker} queued or running; wait for it or let it finish")
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO jobs (ticker, kind, profile) VALUES (%s, %s, %s) RETURNING id", (ticker, kind, profile))
-            job_id = cur.fetchone()[0]
-        conn.commit()
-    finally:
-        conn.close()
-    t = threading.Thread(target=_run, args=(job_id, kind, ticker, profile), daemon=True, name=f"job-{job_id}")
-    with _lock:
-        _running[job_id] = {"ticker": ticker, "kind": kind, "thread": t}
-    t.start()
-    return job_id
+                cur.execute("INSERT INTO jobs (ticker, kind, profile) VALUES (%s, %s, %s) RETURNING id", (ticker, kind, profile))
+                job_id = cur.fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        t = threading.Thread(target=_run, args=(job_id, kind, ticker, profile), daemon=True, name=f"job-{job_id}")
+        with _lock:
+            _running.pop(placeholder, None)
+            _running[job_id] = {"ticker": ticker, "kind": kind, "thread": t}
+        t.start()
+        return job_id
+    except BaseException:
+        with _lock:
+            _running.pop(placeholder, None)
+        raise
 
 
 def _run(job_id: int, kind: str, ticker: str, profile: str) -> None:

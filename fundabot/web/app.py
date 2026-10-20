@@ -1,5 +1,8 @@
 """FastAPI routes. Pages are server-rendered Jinja templates; htmx swaps the chart, narrative, news and job fragments."""
+import html
 from pathlib import Path
+
+import jinja2
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,7 +19,7 @@ from fundabot.web import jobs, views
 HERE = Path(__file__).parent
 app = FastAPI(title="fundabot")
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
-templates = Jinja2Templates(directory=HERE / "templates")
+templates = Jinja2Templates(env=jinja2.Environment(loader=jinja2.FileSystemLoader(HERE / "templates"), autoescape=True))  # .j2 files are not auto-detected as HTML
 templates.env.globals.update(viz_css=charts.VIZ_CSS, profiles=profiles.names, estimates=profiles.estimates)
 
 
@@ -118,7 +121,7 @@ def job_start(request: Request, response: Response, ticker: str = Form(...), kin
     try:
         job_id = jobs.start(kind, ticker, profile)
     except jobs.JobRefused as e:
-        return HTMLResponse(f'<div class="job refused">{e}</div>', status_code=409)
+        return HTMLResponse(f'<div class="job refused">{html.escape(str(e))}</div>', status_code=409)
     resp = render("_job.html.j2", request, job=jobs.status(job_id))
     resp.headers["X-Job-Id"] = str(job_id)
     return resp
@@ -143,7 +146,7 @@ def review_page(request: Request):
 def review_label(request: Request, ticker: str = Form(...), agent: str = Form(...), vote: str = Form(...), note: str = Form("")):
     with views.connect() as conn:
         review.label(conn, ticker, agent, vote, note)
-    return HTMLResponse(f'<span class="labelled">labelled {agent} {vote}</span>')
+    return HTMLResponse(f'<span class="labelled">labelled {html.escape(agent)} {html.escape(vote)}</span>')
 
 
 @app.get("/queue", response_class=HTMLResponse)

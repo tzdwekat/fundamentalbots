@@ -10,7 +10,7 @@ from psycopg.types.json import Jsonb
 
 from fundabot.agents.base import run_batch
 from fundabot.agents.context import metric_line, select_metrics
-from fundabot.eval.grounding import EVIDENCE_ID, _supported, extract_numbers
+from fundabot.eval.grounding import _supported, extract_numbers
 
 NARRATIVE_SCHEMA = {
     "type": "object",
@@ -21,7 +21,8 @@ NARRATIVE_SCHEMA = {
     },
     "required": ["sentences", "one_line"], "additionalProperties": False,
 }
-STATS_KEY = re.compile(r"\b(?:spy_ret|excess|ret)_\d+m\b")  # a model that echoes a stats key must not have "1m" read as one million
+STATS_KEY = re.compile(r"\b(?:spy_ret|excess|ret)_\d+m\b")
+ANY_ID = re.compile(r"\b(?:chunk|metric|news|filing|price|earnings|transcript|grade|split):\S+")  # ids written inline carry digits that are not figures  # a model that echoes a stats key must not have "1m" read as one million
 PCT = ("ret_1m", "ret_3m", "ret_6m", "ret_12m", "drawdown_52w", "dist_52w_low", "ma50_slope_20d", "vol_20d", "spy_ret", "excess_ret")
 SYSTEM = """You explain what moved a stock's price over a window, for an investor who will check every word.
 Write at most six sentences. Each sentence names one driver (a filing, a news item, an earnings result, a market-wide
@@ -102,12 +103,14 @@ def ground_narrative(output: dict, inputs: dict) -> dict:
             dropped.append({**sent, "reason": f"unresolved: {', '.join(missing) or 'no evidence'}"})
             continue
         cited_values = [v for e in evidence for _, v in extract_numbers(texts.get(e, ""))]
-        unsupported = [t for t, v in extract_numbers(STATS_KEY.sub(" ", EVIDENCE_ID.sub(" ", sent["text"]))) if not _supported(t, v, stats_values, cited_values)]
+        unsupported = [t for t, v in extract_numbers(STATS_KEY.sub(" ", ANY_ID.sub(" ", sent["text"]))) if not _supported(t, v, stats_values, cited_values)]
         if unsupported:
             dropped.append({**sent, "reason": f"unsupported: {', '.join(unsupported)}"})
             continue
         kept.append({**sent, "evidence": evidence, "unsupported_numbers": []})
-    return {"sentences": kept, "dropped": dropped, "one_line": output.get("one_line", "")}
+    one_line = output.get("one_line", "")
+    one_bad = [t for t, v in extract_numbers(STATS_KEY.sub(" ", ANY_ID.sub(" ", one_line))) if not _supported(t, v, stats_values, [])]  # the one-liner cites nothing, so only the stats can support it
+    return {"sentences": kept, "dropped": dropped, "one_line": "" if one_bad else one_line, "one_line_unsupported": one_bad}
 
 
 def load(conn: psycopg.Connection, cik: int, window_days: int) -> dict | None:

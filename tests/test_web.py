@@ -165,3 +165,50 @@ def test_queue_shows_spend_vs_budget(client, db_conn):
     r = client.get("/queue")
     assert r.status_code == 200 and "1.25" in r.text and "NVDA" in r.text and "budget" in r.text.lower()
     assert client.get("/calibration").status_code == 200
+
+
+@pytest.mark.db
+async def test_untrusted_text_is_escaped(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    seed_prices(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO news (id, cik, published, publisher, site, title, url, text, kind) VALUES ('x1', 320193, '2026-10-15 12:00+00', 'Evil <i>Co</i>', 'e', '<b>XSS</b> & co', 'http://e/1', '<script>alert(1)</script>', 'news')")
+    db_conn.commit()
+    r = client.get("/t/AAPL?window=90&news=7")
+    assert "<b>XSS</b>" not in r.text and "&lt;b&gt;XSS&lt;/b&gt; &amp; co" in r.text and "<script>alert" not in r.text
+    assert 'data-theme="light"' in r.text  # the chart CSS is still raw inside <style>
+    e = client.get("/evidence/-/news:x1")
+    assert "<script>" not in e.text and "&lt;script&gt;" in e.text
+
+
+@pytest.mark.db
+async def test_cheap_panel_uses_newest_run_and_renders_claims(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    from fundabot.orchestrate import snapshot
+    from tests.test_pipeline import fake_output
+
+    conn = db_conn
+    await pipeline.analyze(conn, "AAPL", PERSONAS, FakeAdapter(fake_output), FakeEmbedder(), out_dir=tmp_path)
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM snapshots"); (old,) = cur.fetchone()
+    new = snapshot.create_snapshot(conn, "AAPL", 320193, 99, ["0000320193-25-000079"], date(2026, 10, 18), 350.0, 1e10)
+    assert new < old or True  # whatever the hash order, created_at decides
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO analyses (snapshot_id, persona, provider, model, output, grounded, chunk_ids, status) "
+                    "SELECT %s, persona, provider, model, output, jsonb_set(grounded, '{score}', '9'), chunk_ids, status FROM analyses WHERE snapshot_id = %s", (new, old))
+    conn.commit()
+    r = client.get("/t/AAPL")
+    assert r.status_code == 200 and "cheap run" in r.text and "bull/fake 9" in r.text and "·  panel" not in r.text and "++" not in r.text
+
+
+@pytest.mark.db
+def test_edgar_outage_still_renders(client, db_conn, monkeypatch):
+    from fundabot.web import views
+
+    seed_watch(db_conn)
+    seed_prices(db_conn)
+
+    def boom(cik):
+        raise RuntimeError("EDGAR down")
+    monkeypatch.setattr(views, "list_filings", boom)
+    r = client.get("/t/AAPL?window=90")
+    assert r.status_code == 200 and "<svg" in r.text

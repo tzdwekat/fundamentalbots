@@ -39,10 +39,12 @@ def price_stats(closes: pd.DataFrame, asof: date | None = None) -> dict:
     for key, days in WINDOWS.items():
         base = close_on_or_before_date(df, last_date - timedelta(days=days)) if df.date.iloc[0] <= last_date - timedelta(days=days) else None
         s[key] = (close / base - 1) if base else None
-    year = df[df.date >= last_date - timedelta(days=365)]
-    s["high_52w"], s["low_52w"] = float(year.close.max()), float(year.close.min())
-    s["drawdown_52w"] = close / s["high_52w"] - 1
-    s["dist_52w_low"] = close / s["low_52w"] - 1
+    if df.date.iloc[0] <= last_date - timedelta(days=365):
+        year = df[df.date >= last_date - timedelta(days=365)]
+        s["high_52w"], s["low_52w"] = float(year.close.max()), float(year.close.min())
+        s["drawdown_52w"], s["dist_52w_low"] = close / s["high_52w"] - 1, close / s["low_52w"] - 1
+    else:  # under a year of history: no 52-week figures rather than a shorter span dressed as one
+        s["high_52w"] = s["low_52w"] = s["drawdown_52w"] = s["dist_52w_low"] = None
     c = df.close.astype(float)
     s["ma50"] = float(c.iloc[-50:].mean()) if len(c) >= 50 else None
     s["ma200"] = float(c.iloc[-200:].mean()) if len(c) >= 200 else None
@@ -145,7 +147,6 @@ RULES = [  # (label, predicate over (momentum, trend, valuation)); first match w
     ("bottoming", lambda m, t, v: t == "turning_up"),
     ("declining", lambda m, t, v: m == "decelerating" and t == "down"),
     ("decelerating", lambda m, t, v: m == "decelerating"),
-    ("recovering", lambda m, t, v: t == "up"),
     ("mixed", lambda m, t, v: True),
 ]
 
@@ -165,7 +166,7 @@ def outlook(stats: dict, metrics: list[Metric]) -> dict:
         trend_state = "up"
     elif not stats["above_ma50"] and not stats["above_ma200"] and stats["ma50_slope_20d"] < 0:
         trend_state = "down"
-    elif not stats["above_ma200"] and stats["ma50_slope_20d"] > 0 and (stats.get("drawdown_52w") or 0) < -0.2:
+    elif not stats["above_ma200"] and stats["ma50_slope_20d"] > 0 and (stats.get("drawdown_52w") if stats.get("drawdown_52w") is not None else 0) < -0.2:
         trend_state = "turning_up"
     else:
         trend_state = "mixed"

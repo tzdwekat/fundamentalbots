@@ -8,7 +8,7 @@
     <span class="big">{{ stats.close|num }}</span> <span class="muted">close {{ stats.asof }}</span>
     <span>1m {{ stats.ret_1m|pct }}</span><span>3m {{ stats.ret_3m|pct }}</span><span>6m {{ stats.ret_6m|pct }}</span><span>12m {{ stats.ret_12m|pct }}</span>
     {% if stats.excess_3m is defined and stats.excess_3m is not none %}<span class="muted">vs S&amp;P 3m {{ stats.excess_3m|pct }}</span>{% endif %}
-    <span class="muted">52w high {{ stats.drawdown_52w|pct }} · low +{{ (stats.dist_52w_low or 0)|pct }}</span>
+    {% if stats.drawdown_52w is not none %}<span class="muted">vs 52w high {{ stats.drawdown_52w|pct }} · vs 52w low {{ stats.dist_52w_low|pct }}</span>{% endif %}
   </div>
   {% else %}<p class="muted">No stored prices yet.</p>{% endif %}
   <div class="actions">

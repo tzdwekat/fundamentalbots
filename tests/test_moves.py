@@ -84,3 +84,16 @@ async def test_ensure_narrative_caches_by_inputs_sha(db_conn):
 def test_stats_key_names_are_not_numbers():
     out = {"sentences": [{"text": "The excess_1m return was -2.3% while ret_12m stayed positive.", "evidence": ["price:2026-09-12"]}], "one_line": "x"}
     assert moves.ground_narrative(out, inputs())["dropped"][0]["reason"] == "unsupported: -2.3%"  # the key names vanish; the real number is still checked
+
+
+def test_one_line_numbers_are_checked():
+    out = {"sentences": [], "one_line": "Up 5.0% over the window on product news."}
+    assert moves.ground_narrative(out, inputs())["one_line"] == "Up 5.0% over the window on product news."  # ret_1m = 0.05
+    bad = {"sentences": [], "one_line": "Up 27% over the window."}
+    g = moves.ground_narrative(bad, inputs())
+    assert g["one_line"] == "" and g["one_line_unsupported"] == ["27%"]
+
+
+def test_inline_ids_of_every_kind_are_not_numbers():
+    out = {"sentences": [{"text": "The 8-K filing:0000320193-26-000077 and news:n1 preceded the price:2026-09-12 drop of 4.1%.", "evidence": ["filing:0000320193-26-000077", "news:n1", "price:2026-09-12"]}], "one_line": ""}
+    assert moves.ground_narrative(out, inputs())["dropped"] == []

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}fundabot{% endblock %}</title>
 <link rel="stylesheet" href="/static/app.css">
-<style>{{ viz_css }}</style>
+<style>{{ viz_css|safe }}</style>
 <script src="/static/htmx.min.js"></script>
 </head>
 <body>
