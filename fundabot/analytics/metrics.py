@@ -6,7 +6,7 @@ import pandas as pd
 from fundabot.analytics import bounds, periods
 
 GROWTH_ITEMS = ["revenue", "gross_profit", "operating_income", "eps_diluted", "fcf"]
-PROPAGATED_FLAGS = {"restated", "derived", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag",
+PROPAGATED_FLAGS = {"restated", "derived", "source_conflict", "partial_debt", "no_prior_year", "tax_rate_clamped", "no_issuance_data", "no_debt_tag",
                     "da_composed", "depreciation_only", "debt_total_tag", "shares_diluted_weighted", "split_adjusted", "tag_ambiguous"}
 NONPOS = object()  # sentinel: nonpositive denominator
 
@@ -92,10 +92,16 @@ def compute_fundamental_metrics(series: dict[str, pd.DataFrame]) -> list[Metric]
     for item, df in series.items():
         unit = {"eps_diluted": "USD/share", "diluted_shares": "shares"}.get(item, "USD")
         extra = ["tag_ambiguous"] if df.attrs.get("tag_ambiguous") else []
+        notes = df.attrs.get("source_notes", {})
         for r in df.itertuples(index=False):
             if r.fy in base_window:
                 prov = {"accession": r.accession, "start": None if r.start is None else str(r.start), "end": str(r.end)}
-                t.add(Metric(item, r.period, float(r.value), unit, f"xbrl:{r.tag}", prov, _row_flags(r) + extra, r.tag))
+                formula = r.tag if str(r.tag).startswith("fmp:") else f"xbrl:{r.tag}"  # the formula names the source
+                note = notes.get((r.fy, r.fq))
+                flags = _row_flags(r) + extra + (["source_conflict"] if note and note.startswith("conflict") else [])
+                if note:
+                    prov["source_note"] = note
+                t.add(Metric(item, r.period, float(r.value), unit, formula, prov, flags, r.tag))
 
     # 2. Derived base items, for every period where inputs exist.
     all_periods = sorted({p for (_, p) in t.m})

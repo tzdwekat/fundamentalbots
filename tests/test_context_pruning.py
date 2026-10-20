@@ -176,3 +176,12 @@ def test_snapshot_block_has_company_line(aapl_metrics):
     head = text.split("METRICS")[0]
     assert "company: Apple Inc. · Technology · Consumer Electronics · 166,000 employees" in head and "about: Apple Inc. designs" in head and len(head) < 900
     assert "company:" not in context.shared_prefix("AAPL", {**snap, "profile": None}, aapl_metrics, [], []).split("METRICS")[0]
+
+
+def test_select_metrics_shows_fmp_base_items():
+    ms = [Metric("revenue", f"FY{y}", 1.0, "USD", "fmp:income:revenue") for y in range(2021, 2026)] + [Metric("revenue", f"Q{q}FY2026", 1.0, "USD", "fmp:income:revenue") for q in (1, 2, 3)]
+    shown = ids(context.select_metrics(ms))
+    assert "revenue@FY2025" in shown and "revenue@Q3FY2026" in shown
+    ms2 = [Metric("sbc", f"FY{y}", 1.0, "USD", "fmp:cashflow:stockBasedCompensation") for y in range(2021, 2026)] + [Metric("sbc", f"Q{q}FY2026", 1.0, "USD", "fmp:cashflow:stockBasedCompensation") for q in (1, 2, 3)] + ms
+    shown2 = ids(context.select_metrics(ms2))
+    assert "sbc@FY2025" in shown2 and "sbc@Q3FY2026" in shown2 and "sbc@Q1FY2026" not in shown2  # raw items: fiscal years + newest quarter, as for xbrl

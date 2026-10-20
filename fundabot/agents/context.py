@@ -70,7 +70,7 @@ def select_metrics(metrics: list[Metric], flags=()) -> list[Metric]:
             continue
         if m.metric_id in group_ids:
             out.append(m)
-        elif m.formula_id.startswith("xbrl:") and (m.period in fys or m.period == newest_q):
+        elif m.formula_id.startswith(("xbrl:", "fmp:")) and (m.period in fys or m.period == newest_q):
             out.append(m)
         elif m.period == "current" and (m.metric_id.endswith("_ttm") or "_5y_" in m.metric_id or m.metric_id.startswith("dcf") or m.metric_id == "reverse_dcf_implied_growth"):
             out.append(m)
