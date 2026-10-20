@@ -26,6 +26,7 @@ def client(monkeypatch, db_conn):
     monkeypatch.setattr(views, "refresh_fmp", lambda conn, cik, ticker: None)
     monkeypatch.setattr(views, "live_quotes", lambda conn, tickers: {})
     monkeypatch.setattr(views.fmp_extra, "fetch_ratings", lambda *a, **k: None)
+    monkeypatch.setattr(views, "refresh_fmp", lambda conn, cik, ticker: None)
     monkeypatch.setattr(views, "next_earnings", lambda conn, cik, ticker: date(2026, 11, 2))
     monkeypatch.setattr(views, "list_filings", lambda cik: pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"]))
     return TestClient(webapp.app)
@@ -252,7 +253,7 @@ async def test_page_sections_fmp(client, db_conn, fixture_prepare, fmp_fixture, 
     seed_fmp(db_conn)
     with db_conn.cursor() as cur:  # metrics the snapshot would carry after prepare()
         cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); sid = cur.fetchone()[0]
-        for mid, val, name in (("seg_iphone_share", 0.86, "iPhone"), ("seg_iphone_yoy", 0.042, "iPhone"), ("seg_mac_share", 0.14, "Mac"), ("seg_mac_yoy", 0.124, "Mac")):
+        for mid, val, name in (("seg_product_iphone_share", 0.86, "iPhone"), ("seg_product_iphone_yoy", 0.042, "iPhone"), ("seg_product_mac_share", 0.14, "Mac"), ("seg_product_mac_yoy", 0.124, "Mac")):
             cur.execute("INSERT INTO metrics (snapshot_id, metric_id, period, value, unit, formula_id, inputs, flags) VALUES (%s, %s, 'FY2025', %s, 'ratio', 'fmp:revenue-product-segmentation', %s, '[\"vendor_fmp\"]')",
                         (sid, mid, val, json.dumps({"name": name})))
         for mid, val in (("pe_peer_median", 18.5), ("pe_vs_peer_median", 2.13), ("dividend_yield", 0.0031), ("dividend_per_share_ttm", 1.06), ("altman_z", 13.5), ("piotroski", 9), ("risk_free_10y", 0.0509)):

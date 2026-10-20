@@ -41,12 +41,12 @@ def segs():
 
 def test_segments_share_and_yoy():
     ms = by_id(F.compute_fmp_metrics([], segs(), [], None, None, None, {}))
-    iphone = ms["seg_iphone_share@FY2025"]
+    iphone = ms["seg_product_iphone_share@FY2025"]
     assert iphone.value == pytest.approx(209586e6 / (33708e6 + 109158e6 + 35686e6 + 28023e6 + 209586e6)) and iphone.inputs["name"] == "iPhone" and "vendor_fmp" in iphone.flags
-    assert ms["seg_iphone_revenue@FY2025"].value == 209586e6 and ms["seg_iphone_revenue@FY2025"].formula_id == "fmp:revenue-product-segmentation"
-    prev = ms["seg_iphone_revenue@FY2024"].value
-    assert ms["seg_iphone_yoy@FY2025"].value == pytest.approx(209586e6 / prev - 1)
-    assert any(k.startswith("seg_americas") for k in ms) and ms["seg_iphone_share@FY2025"].unit == "ratio"
+    assert ms["seg_product_iphone_revenue@FY2025"].value == 209586e6 and ms["seg_product_iphone_revenue@FY2025"].formula_id == "fmp:revenue-product-segmentation"
+    prev = ms["seg_product_iphone_revenue@FY2024"].value
+    assert ms["seg_product_iphone_yoy@FY2025"].value == pytest.approx(209586e6 / prev - 1)
+    assert any(k.startswith("seg_geo_americas") for k in ms) and ms["seg_product_iphone_share@FY2025"].unit == "ratio"
     shares = [m.value for k, m in ms.items() if k.endswith("_share@FY2025") and m.formula_id.endswith("product-segmentation")]
     assert sum(shares) == pytest.approx(1.0)
 
@@ -55,8 +55,9 @@ def test_segment_rename_no_false_growth():
     rows = [{"kind": "product", "fiscal_year": 2024, "name": "Service", "revenue": 100.0}, {"kind": "product", "fiscal_year": 2025, "name": "Services", "revenue": 110.0},
             {"kind": "product", "fiscal_year": 2025, "name": "New Thing", "revenue": 10.0}]
     ms = by_id(F.compute_fmp_metrics([], rows, [], None, None, None, {}))
-    assert ms["seg_services_yoy@FY2025"].value == pytest.approx(0.10)  # Service -> Services is the same segment
-    assert ms["seg_new_thing_yoy@FY2025"].value is None and ms["seg_new_thing_yoy@FY2025"].null_reason == "no_prior"
+    assert ms["seg_product_services_yoy@FY2025"].value == pytest.approx(0.10)  # Service -> Services is the same segment
+    assert "seg_product_services_revenue@FY2024" in ms and "seg_product_service_revenue@FY2024" not in ms  # one display id per identity: the latest name
+    assert ms["seg_product_new_thing_yoy@FY2025"].value is None and ms["seg_product_new_thing_yoy@FY2025"].null_reason == "no_prior"
     assert F.slug("Wearables, Home and Accessories") == "wearables_home_and_acces" and len(F.slug("x" * 40)) <= 24  # 24-char cap
 
 
@@ -87,5 +88,36 @@ def test_scores_and_treasury():
 def test_fmp_metrics_without_coverage():
     ms = by_id(F.compute_fmp_metrics([], [], [], None, None, None, {}))
     for k in ("pe_peer_median@current", "dividend_yield@current", "altman_z@current", "piotroski@current", "risk_free_10y@current"):
-        assert ms[k].value is None and ms[k].null_reason in ("no_coverage", "no_peers")
+        assert ms[k].value is None and ms[k].null_reason in ("no_coverage", "no_peers", "no_dividend")
     assert not any(m.metric_id.startswith("seg_") for m in ms.values())
+
+
+def test_shared_name_across_kinds_and_within_year_collisions():
+    rows = [{"kind": "product", "fiscal_year": 2025, "name": "Other", "revenue": 10.0}, {"kind": "geographic", "fiscal_year": 2025, "name": "Other", "revenue": 20.0},
+            {"kind": "product", "fiscal_year": 2025, "name": "Enterprise Solutions North America", "revenue": 50.0},
+            {"kind": "product", "fiscal_year": 2025, "name": "Enterprise Solutions North Europe", "revenue": 40.0}]
+    ms = F.compute_fmp_metrics([], rows, [], None, None, None, {})
+    keys = [f"{m.metric_id}@{m.period}" for m in ms]
+    assert len(keys) == len(set(keys))  # no duplicate (metric_id, period): store_metrics would crash
+    by = by_id(ms)
+    assert by["seg_product_other_revenue@FY2025"].value == 10.0 and by["seg_geo_other_revenue@FY2025"].value == 20.0
+    product_shares = sorted((m.inputs["name"], m.value) for m in ms if m.metric_id.startswith("seg_product_") and m.metric_id.endswith("_share"))
+    assert [v for _, v in product_shares] == pytest.approx([0.5, 0.4, 0.1]) and len(product_shares) == 3  # both Enterprise lines kept, total includes both
+
+
+def test_dividends_use_adjusted_amounts_and_lapsed_payer():
+    divs = [{"ex_date": date(2026, 8, 10), "amount": 0.27, "adj_amount": 0.27}, {"ex_date": date(2026, 5, 11), "amount": 0.27, "adj_amount": 0.27},
+            {"ex_date": date(2026, 2, 9), "amount": 1.04, "adj_amount": 0.26}, {"ex_date": date(2025, 11, 10), "amount": 1.04, "adj_amount": 0.26}]  # a 4-for-1 split in early 2026
+    ms = by_id(F.compute_fmp_metrics([], [], divs, None, None, 300.0, {}, today=date(2026, 10, 19)))
+    assert ms["dividend_per_share_ttm@current"].value == pytest.approx(1.06)
+    lapsed = [{"ex_date": date(y, 6, 1), "amount": 1.0 + 0.1 * (y - 2015), "adj_amount": 1.0 + 0.1 * (y - 2015)} for y in range(2015, 2023)]
+    ms = by_id(F.compute_fmp_metrics([], [], lapsed, None, None, 50.0, {}, today=date(2026, 10, 19)))
+    assert ms["dividend_per_share_ttm@current"].value == 0.0 and ms["dividend_yield@current"].value == 0.0  # stopped paying: zero, not "no coverage"
+    assert ms["dividend_growth_5y@current"].value is None and ms["dividend_growth_5y@current"].null_reason == "lapsed"
+    none = by_id(F.compute_fmp_metrics([], [], [], None, None, 50.0, {}))
+    assert none["dividend_per_share_ttm@current"].null_reason == "no_dividend"
+
+
+def test_negative_own_pe_is_named():
+    ms = by_id(F.compute_fmp_metrics(peers3(), [], [], None, None, 100.0, {"pe": -12.0, "ev_sales": 9.0}))
+    assert ms["pe_vs_peer_median@current"].value is None and ms["pe_vs_peer_median@current"].null_reason == "negative_earnings"

@@ -245,7 +245,7 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page["panel"] = panel_for(conn, ticker)
     page["metrics_snapshot_id"] = snap["id"] if snap else None
     cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
-    page.update(fmp_sections(conn, cik, metrics, cur.get("pe"), cur.get("ev_sales")))
+    page.update(fmp_sections(conn, cik, ticker, metrics, cur.get("pe"), cur.get("ev_sales"), refresh=refresh))
     return page
 
 
@@ -325,7 +325,7 @@ def ticker_for(conn, cik: int) -> str:
 
 def refresh_fmp(conn, cik: int, ticker: str) -> None:
     """Profile, peers, segments, dividends, insider trades, holders on their own refresh rules; failures keep stored rows."""
-    for step in (fmp_extra.ingest_profile, fmp_extra.ingest_peers, fmp_extra.ingest_segments, fmp_extra.ingest_dividends, fmp_extra.ingest_insider_trades, fmp_extra.ingest_holders):
+    for step in (fmp_extra.ingest_profile, fmp_extra.ingest_segments, fmp_extra.ingest_dividends, fmp_extra.ingest_insider_trades, fmp_extra.ingest_holders):  # peers (18 calls) only at prepare()
         try:
             step(conn, cik, ticker)
         except Exception as e:
@@ -348,22 +348,25 @@ def segment_table(metrics: list[Metric]) -> list[dict]:
         if not m.metric_id.startswith("seg_") or m.value is None:
             continue
         base, field = m.metric_id.rsplit("_", 1)
-        kind = "product" if "product" in m.formula_id else "geographic"
-        rows.setdefault((kind, base), {"kind": kind, "name": m.inputs.get("name", base[4:]), "years": {}})["years"].setdefault(m.period, {})[field] = m.value
+        kind = "product" if base.startswith("seg_product_") else "geographic"
+        yr = rows.setdefault((kind, base), {"kind": kind, "name": m.inputs.get("name", base), "years": {}})["years"].setdefault(m.period, {})
+        yr[field] = m.value
+        yr["name"] = m.inputs.get("name", base)
     out = []
     for (kind, base), r in rows.items():
         years = sorted(r["years"], key=lambda p: int(p[2:]))[-2:]
         latest = r["years"][years[-1]] if years else {}
+        r["name"] = latest.get("name", r["name"])
         out.append({"kind": kind, "name": r["name"], "fy": years[-1] if years else None, "share": latest.get("share"), "yoy": latest.get("yoy"), "revenue": latest.get("revenue"),
                     "prev_share": r["years"][years[0]].get("share") if len(years) == 2 else None})
     return sorted(out, key=lambda r: (r["kind"], -(r["share"] or 0)))
 
 
-def fmp_sections(conn, cik: int, metrics: list[Metric], own_pe: float | None, own_ev_sales: float | None) -> dict:
+def fmp_sections(conn, cik: int, ticker: str, metrics: list[Metric], own_pe: float | None, own_ev_sales: float | None, refresh: bool = True) -> dict:
     cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
     peers = fmp_extra.load_peers(conn, cik)
     own_row = {"peer": "(this company)", "name": "", "pe_ttm": own_pe, "ev_sales_ttm": own_ev_sales, "market_cap": cur.get("market_cap"), "own": True}
-    ratings = fmp_extra.fact(conn, cik, "ratings", lambda: fmp_extra.fetch_ratings(ticker_for(conn, cik)), 6)
+    ratings = fmp_extra.fact(conn, cik, "ratings", lambda: fmp_extra.fetch_ratings(ticker), 6) if refresh else fmp_extra.fact(conn, cik, "ratings", lambda: None, 10**6)
     with conn.cursor() as c2:
         c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key = 'fmp_crosscheck') OR (cik = 0 AND key = 'treasury_10y')", (cik,))
         facts = dict(c2.fetchall())

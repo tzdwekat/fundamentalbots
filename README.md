@@ -135,8 +135,9 @@ second table comparing our TTM ratios with FMP's (10 % tolerance; a mismatch mea
 on AAPL all ten agree within 4 %. The ticker page shows all of it under Peers, Revenue segments, Dividend, Ownership,
 Scores and ratings, and Cross-check.
 
-Bulk and batch endpoints: they reduce the number of API calls, not the bill. FMP is a flat subscription and the
-pipeline makes about fifteen calls per ticker, far below the plan's rate limit; the money goes to model tokens, which
+Bulk and batch endpoints: they reduce the number of API calls, not the bill. FMP is a flat subscription and a
+`prepare()` makes about forty calls per ticker (eighteen of them the peers' multiples, refreshed daily), far below the
+plan's rate limit; the money goes to model tokens, which
 these endpoints do not touch. The one batch call that earns its place is the overview's batch quote (one call for the
 whole watchlist instead of one per row). Not in use: FMP's own DCF and recommendations (we compute our own), senate and
 house trades, ESG, crowdfunding, commodities, forex, crypto, intraday bars.

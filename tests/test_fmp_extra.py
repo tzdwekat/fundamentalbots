@@ -131,3 +131,16 @@ def test_holders_skip_incomplete_quarter(db_conn):
         cur.execute("DELETE FROM holders")
     db_conn.commit()
     assert fmp_extra.ingest_holders(db_conn, 320193, "AAPL", get=get, today=date(2026, 12, 15), max_age_hours=0) == 10 and asked[-1] == (2026, 3)
+
+
+@pytest.mark.db
+def test_empty_result_counts_as_fresh(db_conn):
+    calls = []
+
+    def get(path, **params):
+        calls.append(path)
+        return []
+    assert fmp_extra.ingest_dividends(db_conn, 1, "NOPAY", get=get) == 0
+    assert fmp_extra.ingest_dividends(db_conn, 1, "NOPAY", get=get) == 0 and calls.count("dividends") == 1  # an empty answer is remembered for the refresh window
+    assert fmp_extra.ingest_profile(db_conn, 1, "NOPAY", get=get) is False and fmp_extra.ingest_profile(db_conn, 1, "NOPAY", get=get) is False and calls.count("profile") == 1
+    assert fmp_extra.ingest_peers(db_conn, 1, "NOPAY", get=get) == 0 and fmp_extra.ingest_peers(db_conn, 1, "NOPAY", get=get) == 0 and calls.count("stock-peers") == 1

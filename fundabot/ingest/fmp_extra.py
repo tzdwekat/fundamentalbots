@@ -4,7 +4,6 @@ ticker_facts. Every dataset has fetched_at and a refresh rule; a failed refresh 
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
-from statistics import median  # noqa: F401  (used by fmp_metrics; kept here so the two modules share one import surface)
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -28,10 +27,20 @@ def _num(v):
 
 
 def _fresh(conn, table: str, cik: int, max_age_hours: float) -> bool:
+    """Fresh when rows were fetched recently OR an attempt recently came back empty (so a non-payer is not refetched on every page view)."""
     with conn.cursor() as cur:
         cur.execute(f"SELECT max(fetched_at) FROM {table} WHERE cik = %s", (cik,))
         last = cur.fetchone()[0]
-    return last is not None and datetime.now(timezone.utc) - last < timedelta(hours=max_age_hours)
+        cur.execute("SELECT fetched_at FROM ticker_facts WHERE cik = %s AND key = %s", (cik, f"fetched:{table}"))
+        attempt = cur.fetchone()
+    stamps = [t for t in (last, attempt[0] if attempt else None) if t is not None]
+    return bool(stamps) and datetime.now(timezone.utc) - max(stamps) < timedelta(hours=max_age_hours)
+
+
+def _attempted(conn, table: str, cik: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO ticker_facts (cik, key, value, fetched_at) VALUES (%s, %s, 'null', now()) ON CONFLICT (cik, key) DO UPDATE SET fetched_at = now()", (cik, f"fetched:{table}"))
+    conn.commit()
 
 
 # ---- profile
@@ -49,6 +58,7 @@ def ingest_profile(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get,
     if _fresh(conn, "company_profile", cik, max_age_hours):
         return False
     p = fetch_profile(ticker, get)
+    _attempted(conn, "company_profile", cik)
     if p is None:
         return False
     with conn.cursor() as cur:
@@ -81,6 +91,7 @@ def ingest_peers(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get, m
     if _fresh(conn, "peers", cik, max_age_hours):
         return 0
     names = us_peers(get("stock-peers", symbol=_sym(ticker)), ticker)
+    _attempted(conn, "peers", cik)
     quotes = batch_quotes(names, get) if names else {}
     n = 0
     with conn.cursor() as cur:
@@ -113,6 +124,7 @@ def ingest_segments(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get
     if _fresh(conn, "segments", cik, max_age_hours):
         return 0
     n = 0
+    _attempted(conn, "segments", cik)
     with conn.cursor() as cur:
         for path, kind in (("revenue-product-segmentation", "product"), ("revenue-geographic-segmentation", "geographic")):
             for row in get(path, symbol=_sym(ticker), period="annual"):
@@ -136,6 +148,7 @@ def ingest_dividends(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.ge
     if _fresh(conn, "dividends", cik, max_age_hours):
         return 0
     n = 0
+    _attempted(conn, "dividends", cik)
     with conn.cursor() as cur:
         for r in get("dividends", symbol=_sym(ticker), limit=limit):
             cur.execute("INSERT INTO dividends (cik, ex_date, payment_date, declaration_date, amount, adj_amount, fetched_at) VALUES (%s,%s,%s,%s,%s,%s,now()) "
@@ -173,6 +186,7 @@ def ingest_insider_trades(conn: psycopg.Connection, cik: int, ticker: str, get=f
     if _fresh(conn, "insider_trades", cik, max_age_hours):
         return 0
     n = 0
+    _attempted(conn, "insider_trades", cik)
     with conn.cursor() as cur:
         for r in get("insider-trading/search", symbol=_sym(ticker), limit=limit):
             cur.execute("INSERT INTO insider_trades (cik, filing_date, transaction_date, reporting_name, role, transaction_type, acquisition, shares, price, url, fetched_at) "
@@ -210,6 +224,7 @@ def ingest_holders(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get,
         if rows:
             break
     n = 0
+    _attempted(conn, "holders", cik)
     with conn.cursor() as cur:
         for r in rows:
             cur.execute("INSERT INTO holders (cik, quarter_end, investor, shares, market_value, change_pct, ownership_pct, fetched_at) VALUES (%s,%s,%s,%s,%s,%s,%s,now()) "

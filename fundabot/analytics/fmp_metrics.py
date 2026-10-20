@@ -37,49 +37,84 @@ def _peer_metrics(peers: list[dict], own: dict) -> list[Metric]:
     med = {m.metric_id: m.value for m in out}
     for base, mid, ours in (("pe_peer_median", "pe_vs_peer_median", own.get("pe")), ("ev_sales_peer_median", "ev_sales_vs_peer_median", own.get("ev_sales"))):
         ok = med.get(base) and ours is not None and ours > 0
-        out.append(_m(mid, "current", (ours / med[base]) if ok else None, "peers:median", {"own": ours, "peer_median": med.get(base)}, "no_peers" if not med.get(base) else "no_coverage"))
+        reason = "no_peers" if not med.get(base) else "negative_earnings" if ours is not None and ours <= 0 else "no_coverage"
+        out.append(_m(mid, "current", (ours / med[base]) if ok else None, "peers:median", {"own": ours, "peer_median": med.get(base)}, reason))
     return out
 
 
 def _segment_metrics(segments: list[dict]) -> list[Metric]:
+    """Ids carry the kind (seg_product_* / seg_geo_*) so a name shared by both kinds never collides; a segment keeps one
+    identity across years (normalised name) and one display id (its latest name); two names that normalise alike within
+    a year get a numeric suffix rather than overwriting each other."""
     out = []
-    for kind, cap in (("product", MAX_PRODUCT), ("geographic", MAX_GEO)):
+    for kind, cap, prefix in (("product", MAX_PRODUCT, "seg_product_"), ("geographic", MAX_GEO, "seg_geo_")):
         rows = [r for r in segments if r["kind"] == kind and r.get("revenue") is not None]
         if not rows:
             continue
-        latest = max(r["fiscal_year"] for r in rows)
-        keep = {_norm(r["name"]) for r in sorted((r for r in rows if r["fiscal_year"] == latest), key=lambda r: -r["revenue"])[:cap]}
-        by_year: dict[int, dict[str, tuple[str, float]]] = {}
-        for r in rows:
-            by_year.setdefault(r["fiscal_year"], {})[_norm(r["name"])] = (r["name"], r["revenue"])
+        by_year: dict[int, dict[str, tuple[str, float]]] = {}  # fy -> identity key -> (name, revenue)
+        for fy in sorted({r["fiscal_year"] for r in rows}):
+            year_rows = sorted((r for r in rows if r["fiscal_year"] == fy), key=lambda r: -r["revenue"])
+            taken: dict[str, str] = {}
+            for r in year_rows:
+                key = _norm(r["name"])
+                n = 2
+                while key in taken and taken[key] != r["name"]:  # within-year collision: suffix, never drop
+                    key = f"{_norm(r['name'])}_{n}"
+                    n += 1
+                taken[key] = r["name"]
+                by_year.setdefault(fy, {})[key] = (r["name"], r["revenue"])
+        latest = max(by_year)
+        keep = list(by_year[latest])[:cap]
+        display = {}
+        for fy in sorted(by_year, reverse=True):  # the latest name an identity carries is its display id
+            for key, (name, _) in by_year[fy].items():
+                display.setdefault(key, slug(name))
+        used = {}
+        for key in keep:  # display slugs must be unique too
+            d = display[key]
+            n = 2
+            while d in used.values():
+                d = f"{display[key]}_{n}"
+                n += 1
+            used[key] = d
         formula = f"fmp:revenue-{kind}-segmentation"
         for fy in sorted(by_year):
             total = sum(v for _, v in by_year[fy].values())
             for key, (name, rev) in by_year[fy].items():
-                if key not in keep:
+                if key not in used:
                     continue
-                sid = slug(name)
+                sid = prefix + used[key]
                 prev = by_year.get(fy - 1, {}).get(key)
-                out.append(_m(f"seg_{sid}_revenue", f"FY{fy}", rev, formula, {"name": name}, unit="USD"))
-                out.append(_m(f"seg_{sid}_share", f"FY{fy}", rev / total if total else None, formula, {"name": name, "total": total}))
-                out.append(_m(f"seg_{sid}_yoy", f"FY{fy}", (rev / prev[1] - 1) if prev and prev[1] else None, formula, {"name": name, "prior": prev[1] if prev else None}, "no_prior"))
+                out.append(_m(f"{sid}_revenue", f"FY{fy}", rev, formula, {"name": name, "kind": kind}, unit="USD"))
+                out.append(_m(f"{sid}_share", f"FY{fy}", rev / total if total else None, formula, {"name": name, "kind": kind, "total": total}))
+                out.append(_m(f"{sid}_yoy", f"FY{fy}", (rev / prev[1] - 1) if prev and prev[1] else None, formula, {"name": name, "kind": kind, "prior": prev[1] if prev else None}, "no_prior"))
     return out
 
 
 def _dividend_metrics(dividends: list[dict], price: float | None, today: date) -> list[Metric]:
-    rows = sorted((d for d in dividends if d.get("ex_date") and d.get("amount") is not None), key=lambda d: d["ex_date"])
+    rows = sorted((d for d in dividends if d.get("ex_date") and (d.get("adj_amount") is not None or d.get("amount") is not None)), key=lambda d: d["ex_date"])
+
+    def amt(d):  # split-adjusted when FMP gives it, so a pre-split payment is not four times too big
+        return d["adj_amount"] if d.get("adj_amount") is not None else d["amount"]
     ttm = [d for d in rows if d["ex_date"] > today - timedelta(days=365) and d["ex_date"] <= today]
-    dps = sum(d["amount"] for d in ttm) if ttm else None
-    out = [_m("dividend_per_share_ttm", "current", dps, "fmp:dividends", {"payments": len(ttm)}),
-           _m("dividend_yield", "current", (dps / price) if dps is not None and price else None, "fmp:dividends", {"dps_ttm": dps, "price": price})]
+    if not rows:
+        dps = None
+    else:
+        dps = sum(amt(d) for d in ttm) if ttm else 0.0  # paid before but not in the last year: zero, which is the fact
+    out = [_m("dividend_per_share_ttm", "current", dps, "fmp:dividends", {"payments": len(ttm)}, "no_dividend"),
+           _m("dividend_yield", "current", (dps / price) if dps is not None and price else None, "fmp:dividends", {"dps_ttm": dps, "price": price}, "no_dividend" if dps is None else "no_coverage")]
     years: dict[int, float] = {}
     for d in rows:
-        years[d["ex_date"].year] = years.get(d["ex_date"].year, 0.0) + (d.get("adj_amount") if d.get("adj_amount") is not None else d["amount"])
+        years[d["ex_date"].year] = years.get(d["ex_date"].year, 0.0) + amt(d)
     full = sorted(y for y in years if y < today.year)  # completed calendar years only
-    growth = None
-    if len(full) >= 6 and years[full[-6]] > 0:
+    growth, reason = None, "insufficient_history"
+    if rows and (not full or full[-1] < today.year - 1):
+        reason = "lapsed"  # no payment last year: a growth rate from the paying years would mislead
+    elif len(full) >= 6 and years[full[-6]] > 0:
         growth = (years[full[-1]] / years[full[-6]]) ** (1 / 5) - 1
-    out.append(_m("dividend_growth_5y", "current", growth, "fmp:dividends", {"from_year": full[-6] if len(full) >= 6 else None, "to_year": full[-1] if full else None}, "insufficient_history"))
+    elif not rows:
+        reason = "no_dividend"
+    out.append(_m("dividend_growth_5y", "current", growth, "fmp:dividends", {"from_year": full[-6] if len(full) >= 6 else None, "to_year": full[-1] if full else None}, reason))
     return out
 
 

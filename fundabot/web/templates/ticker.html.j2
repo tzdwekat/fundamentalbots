@@ -53,7 +53,7 @@
   {% include "_segments.html.j2" %}
   <h3>Dividend</h3>
   {% if dividends.dividend_per_share_ttm %}<p>TTM {{ dividends.dividend_per_share_ttm|num }} per share · yield {{ (dividends.dividend_yield or 0)|pct }}{% if dividends.dividend_growth_5y is not none %} · 5y growth {{ dividends.dividend_growth_5y|pct }}{% endif %}
-    {% if dividend_rows %}<span class="muted">· last ex-date {{ dividend_rows[0].ex_date }} ({{ dividend_rows[0].amount|num }})</span>{% endif %}</p>{% else %}<p class="muted">No dividend data.</p>{% endif %}
+    {% if dividend_rows %}<span class="muted">· last ex-date {{ dividend_rows[0].ex_date }} ({{ dividend_rows[0].amount|num }})</span>{% endif %}</p>{% elif dividends.dividend_per_share_ttm == 0 %}<p class="muted">No dividend paid in the last year.</p>{% else %}<p class="muted">Pays no dividend (none on record).</p>{% endif %}
   {% include "_ownership.html.j2" %}
   <h3>Scores and ratings</h3>
   <p>{% if scores.altman_z is not none %}Altman Z {{ scores.altman_z|num(1) }} · {% endif %}{% if scores.piotroski is not none %}Piotroski {{ scores.piotroski|int }} of 9{% endif %}{% if scores.altman_z is none and scores.piotroski is none %}<span class="muted">no scores</span>{% endif %}
