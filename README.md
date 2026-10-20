@@ -155,6 +155,16 @@ passage; the metrics table; DCF assumptions; and a sources appendix for every ci
 
 ## Accuracy notes
 
+Sources (2026-10-19): the fundamentals come from two sources merged per value in code. EDGAR XBRL company facts are the
+filed record (tag map, restatements, splits, fiscal calendar, cover-page shares); FMP's standardised statements are the
+second. For each value: only one source has it → that one; EDGAR's is derived (a Q4 or year-to-date subtraction) →
+FMP's reported quarter; both reported and within 2 % → the filed value, confirmed; both reported and apart → the filed
+value, flagged `source_conflict` with FMP's figure attached, visible to the agents, in the report (`*`) and on the page.
+Every metric's formula names its source (`xbrl:Revenues`, `fmp:income:revenue`); the evidence drawer shows it with a
+link to the filing. An FMP zero is a missing line, never a value. `fundabot verify T` prints yfinance, FMP-TTM and
+FMP-vs-EDGAR checks; on AAPL 266 of 293 statement lines agree, and the 27 that do not are FMP's broader debt definition
+(commercial paper and leases) plus one FMP cash figure, all kept on the filed value (docs/handcheck-2026-10.md).
+
 See `docs/handcheck-2026-10.md` for the 20-ticker check and `docs/superpowers/specs/` for the period and tag rules.
 Metrics are never guessed: a missing line item is `null` with a reason. Derived values (Q4 = FY - Q1..Q3, Q2/Q3 from
 year-to-date cash-flow statements, composed D&A, reported-total debt, diluted-share fallback) carry flags that travel

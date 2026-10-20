@@ -34,3 +34,29 @@ Null key metrics are expected where the filer has no such line item. They are `n
 Note: `verify` covers statement totals and EPS. Ratios, valuation ranges and the DCF are derived from those inputs plus
 prices and share counts; their flags (`derived`, `split_adjusted`, `da_composed`, `debt_total_tag`, `shares_diluted_weighted`) mark
 every value that rests on a fallback.
+
+## 2026-10-19: FMP statements merged with EDGAR per value (Phase 5d)
+
+Rule (code, `fundabot/analytics/fmp_series.merge_series`): only one source has the value → that one; EDGAR's row is
+derived (Q4 or year-to-date subtraction) → FMP's reported quarter, confirmed by EDGAR when they agree; both reported
+and within 2 % → the filed EDGAR value, confirmed by FMP; both reported and apart → the filed EDGAR value, flagged
+`source_conflict` with FMP's figure in the metric's inputs. Every formula names its source (`xbrl:…` or `fmp:…`).
+
+AAPL before/after on the shown table (5 fiscal years, 4 quarters, current): two cells changed, both for the better.
+
+| cell | before | after | why |
+|---|---|---|---|
+| eps_diluted@Q4FY2025 | 1.84 (derived: FY minus nine months) | 1.85 (FMP, reported) | a per-share figure cannot be derived by subtraction when the share count moves; the reported quarter is right |
+| revenue_cagr_5y@FY2021 | null (tag_missing) | 11.1 % | FMP's longer annual history supplies FY2016 revenue |
+
+Base rows stored: 1,494; 183 from FMP (older history, reported Q4s, items EDGAR lacks), 1,311 from EDGAR; 812 of the
+EDGAR rows confirmed by FMP within 2 %; 63 conflicts, all kept on the filed value and flagged:
+
+- `short_term_debt` and `total_debt_reported`, every period: FMP's lines include commercial paper and lease liabilities
+  (20.3B vs 12.4B at FY2025); EDGAR's `LongTermDebtCurrent` does not. Definitional, permanent, shown on the page.
+- `intangibles` Q2/Q3 FY2026: FMP 21.3B / 20.3B vs filed 25.8B / 25.4B.
+- `cash` Q2FY2026: FMP 36.3B vs filed 45.6B. A genuine FMP discrepancy; the filed value stands.
+- `capex` FY2015–FY2017 and `da` FY2015: FMP's older figures differ from the filings by 2–20 %; outside the shown window.
+
+`fundabot verify AAPL` prints the three checks: yfinance statements (FY values), FMP TTM ratios (10 of 10 within 4 %),
+and FMP vs EDGAR statement lines (266 of 293 within 2 %, the 27 above).
