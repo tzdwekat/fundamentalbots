@@ -1,0 +1,40 @@
+[
+ {
+  "symbol": "AAPL",
+  "name": "Apple Inc.",
+  "price": 342.94,
+  "changePercentage": -0.1514,
+  "change": -0.52,
+  "volume": 34524344,
+  "dayLow": 340.115,
+  "dayHigh": 345.99,
+  "yearHigh": 348.15,
+  "yearLow": 243.42,
+  "marketCap": 5004928089200,
+  "priceAvg50": 326.2916,
+  "priceAvg200": 292.8201,
+  "exchange": "NASDAQ",
+  "open": 340.975,
+  "previousClose": 343.46,
+  "timestamp": 1792440001
+ },
+ {
+  "symbol": "NVDA",
+  "name": "NVIDIA Corporation",
+  "price": 217.09,
+  "changePercentage": 1.38234,
+  "change": 2.96,
+  "volume": 98236684,
+  "dayLow": 214.7,
+  "dayHigh": 219.62,
+  "yearHigh": 243.37,
+  "yearLow": 164.27,
+  "marketCap": 5231869000000,
+  "priceAvg50": 222.9392,
+  "priceAvg200": 203.12395,
+  "exchange": "NASDAQ",
+  "open": 218.01,
+  "previousClose": 214.13,
+  "timestamp": 1792440001
+ }
+]

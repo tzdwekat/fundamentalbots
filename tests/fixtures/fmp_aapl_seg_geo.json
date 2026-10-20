@@ -1,0 +1,228 @@
+[
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2025,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2025-09-27",
+  "data": {
+   "Americas Segment": 178353000000,
+   "Europe Segment": 111032000000,
+   "Greater China Segment": 64377000000,
+   "Japan Segment": 28703000000,
+   "Rest of Asia Pacific Segment": 33696000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2024,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2024-09-28",
+  "data": {
+   "Americas Segment": 167045000000,
+   "Europe Segment": 101328000000,
+   "Greater China Segment": 66952000000,
+   "Japan Segment": 25052000000,
+   "Rest of Asia Pacific Segment": 30658000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2023,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2023-09-30",
+  "data": {
+   "Americas Segment": 162560000000,
+   "Europe Segment": 94294000000,
+   "Greater China Segment": 72559000000,
+   "Japan Segment": 24257000000,
+   "Rest of Asia Pacific Segment": 29615000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2022,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2022-09-24",
+  "data": {
+   "Americas Segment": 169658000000,
+   "Europe Segment": 95118000000,
+   "Greater China Segment": 74200000000,
+   "Japan Segment": 25977000000,
+   "Rest of Asia Pacific Segment": 29375000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2021,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2021-09-25",
+  "data": {
+   "Americas Segment": 153306000000,
+   "Europe Segment": 89307000000,
+   "Greater China Segment": 68366000000,
+   "Japan Segment": 28482000000,
+   "Rest of Asia Pacific Segment": 26356000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2020,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2020-09-26",
+  "data": {
+   "Americas Segment": 124556000000,
+   "Europe Segment": 68640000000,
+   "Greater China Segment": 40308000000,
+   "Japan Segment": 21418000000,
+   "Rest of Asia Pacific Segment": 19593000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2019,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2019-09-28",
+  "data": {
+   "Americas Segment": 116914000000,
+   "Europe Segment": 60288000000,
+   "Greater China Segment": 43678000000,
+   "Japan Segment": 21506000000,
+   "Rest of Asia Pacific Segment": 17788000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2018,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2018-09-29",
+  "data": {
+   "Americas Segment": 112093000000,
+   "Europe Segment": 62420000000,
+   "Greater China Segment": 51942000000,
+   "Japan Segment": 21733000000,
+   "Rest of Asia Pacific Segment": 17407000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2017,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2017-09-30",
+  "data": {
+   "Americas Segment": 96600000000,
+   "Europe Segment": 54938000000,
+   "Greater China Segment": 44764000000,
+   "Japan Segment": 17733000000,
+   "Rest of Asia Pacific Segment": 15199000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2016,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2016-09-24",
+  "data": {
+   "Americas Segment": 86613000000,
+   "Europe Segment": 49952000000,
+   "Greater China Segment": 48492000000,
+   "Japan Segment": 16928000000,
+   "Rest of Asia Pacific Segment": 13654000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2015,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2015-09-26",
+  "data": {
+   "Americas Segment": 93864000000,
+   "Europe Segment": 50337000000,
+   "Greater China Segment": 58715000000,
+   "Japan Segment": 15706000000,
+   "Rest of Asia Pacific Segment": 15093000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2014,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2014-09-27",
+  "data": {
+   "Americas Segment": 65232000000,
+   "Europe Segment": 40929000000,
+   "Greater China Segment": 29846000000,
+   "Japan Segment": 14982000000,
+   "Rest of Asia Pacific Segment": 10344000000,
+   "Other Countries": 21462000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2013,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2013-09-28",
+  "data": {
+   "Americas Segment": 62739000000,
+   "Europe Segment": 37883000000,
+   "Greater China Segment": 25417000000,
+   "Japan Segment": 13462000000,
+   "Rest of Asia Pacific Segment": 11181000000,
+   "Other Countries": 20228000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2012,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2012-09-29",
+  "data": {
+   "Americas Segment": 57512000000,
+   "Europe Segment": 36323000000,
+   "Japan Segment": 10571000000,
+   "Rest of Asia Pacific Segment": 33274000000,
+   "Other Countries": 18828000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2011,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2011-09-24",
+  "data": {
+   "Americas Segment": 38315000000,
+   "Europe Segment": 27778000000,
+   "Japan Segment": 5437000000,
+   "Rest of Asia Pacific Segment": 22592000000,
+   "Other Countries": 14127000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2010,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2010-09-25",
+  "data": {
+   "Americas Segment": 24498000000,
+   "Europe Segment": 18692000000,
+   "Japan Segment": 3981000000,
+   "Rest of Asia Pacific Segment": 8256000000,
+   "Other Countries": 9798000000
+  }
+ }
+]

@@ -1,0 +1,62 @@
+[
+ {
+  "symbol": "002241.SZ",
+  "companyName": "Goertek Inc.",
+  "price": 20.22,
+  "mktCap": 71944025732
+ },
+ {
+  "symbol": "066570.KS",
+  "companyName": "LG Electronics Inc.",
+  "price": 164100,
+  "mktCap": 26632841045100
+ },
+ {
+  "symbol": "300857.SZ",
+  "companyName": "Sharetronic Data Technology Co., Ltd.",
+  "price": 206.9,
+  "mktCap": 101249204700
+ },
+ {
+  "symbol": "300866.SZ",
+  "companyName": "Anker Innovations Limited",
+  "price": 108.81,
+  "mktCap": 58687331365
+ },
+ {
+  "symbol": "603296.SS",
+  "companyName": "Huaqin Co., Ltd.",
+  "price": 67.34,
+  "mktCap": 95726535384
+ },
+ {
+  "symbol": "688036.SS",
+  "companyName": "Shenzhen Transsion Holdings Co., Ltd.",
+  "price": 52.24,
+  "mktCap": 60137643200
+ },
+ {
+  "symbol": "PCRFF",
+  "companyName": "Panasonic Holdings Corporation",
+  "price": 25.3,
+  "mktCap": 59073603006
+ },
+ {
+  "symbol": "SONY",
+  "companyName": "Sony Group Corporation",
+  "price": 24.77,
+  "mktCap": 147770056215
+ },
+ {
+  "symbol": "SSNLF",
+  "companyName": "Samsung Electronics Co., Ltd.",
+  "price": 65.21,
+  "mktCap": 843089655748
+ },
+ {
+  "symbol": "XIACF",
+  "companyName": "Xiaomi Corporation",
+  "price": 3.35,
+  "mktCap": 86245296588
+ }
+]

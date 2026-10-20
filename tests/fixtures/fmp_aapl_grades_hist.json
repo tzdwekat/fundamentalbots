@@ -1,0 +1,20 @@
+[
+ {
+  "symbol": "AAPL",
+  "date": "2026-10-01",
+  "analystRatingsStrongBuy": 6,
+  "analystRatingsBuy": 19,
+  "analystRatingsHold": 13,
+  "analystRatingsSell": 3,
+  "analystRatingsStrongSell": 3
+ },
+ {
+  "symbol": "AAPL",
+  "date": "2026-09-01",
+  "analystRatingsStrongBuy": 6,
+  "analystRatingsBuy": 19,
+  "analystRatingsHold": 14,
+  "analystRatingsSell": 3,
+  "analystRatingsStrongSell": 3
+ }
+]

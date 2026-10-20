@@ -1,0 +1,223 @@
+[
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2025,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2025-09-27",
+  "data": {
+   "Mac": 33708000000,
+   "Service": 109158000000,
+   "Wearables, Home and Accessories": 35686000000,
+   "iPad": 28023000000,
+   "iPhone": 209586000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2024,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2024-09-28",
+  "data": {
+   "Mac": 29984000000,
+   "Service": 96169000000,
+   "Wearables, Home and Accessories": 37005000000,
+   "iPad": 26694000000,
+   "iPhone": 201183000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2023,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2023-09-30",
+  "data": {
+   "Mac": 29357000000,
+   "Service": 85200000000,
+   "Wearables, Home and Accessories": 39845000000,
+   "iPad": 28300000000,
+   "iPhone": 200583000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2022,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2022-09-24",
+  "data": {
+   "Mac": 40177000000,
+   "Service": 78129000000,
+   "Wearables, Home and Accessories": 41241000000,
+   "iPad": 29292000000,
+   "iPhone": 205489000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2021,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2021-09-25",
+  "data": {
+   "Mac": 35190000000,
+   "Service": 68425000000,
+   "Wearables, Home and Accessories": 38367000000,
+   "iPad": 31862000000,
+   "iPhone": 191973000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2020,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2020-09-26",
+  "data": {
+   "Mac": 28622000000,
+   "Service": 53768000000,
+   "Wearables, Home and Accessories": 30620000000,
+   "iPad": 23724000000,
+   "iPhone": 137781000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2019,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2019-09-28",
+  "data": {
+   "Mac": 25740000000,
+   "Service": 46291000000,
+   "Wearables, Home and Accessories": 24482000000,
+   "iPad": 21280000000,
+   "iPhone": 142381000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2018,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2018-09-29",
+  "data": {
+   "Mac": 25484000000,
+   "Service": 37190000000,
+   "iPad": 18805000000,
+   "iPhone": 166699000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2017,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2017-09-30",
+  "data": {
+   "Mac": 25850000000,
+   "Service": 29980000000,
+   "iPad": 19222000000,
+   "iPhone": 141319000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2016,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2016-09-24",
+  "data": {
+   "Mac": 22831000000,
+   "iPad": 20628000000,
+   "iPhone": 136700000000,
+   "Service": 24348000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2015,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2015-09-26",
+  "data": {
+   "Mac": 25471000000,
+   "iPad": 23227000000,
+   "iPhone": 155041000000,
+   "Service": 19909000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2014,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2014-09-27",
+  "data": {
+   "Mac": 24079000000,
+   "Wearables, Home and Accessories": 6093000000,
+   "iPad": 30283000000,
+   "iPhone": 101991000000,
+   "iPod": 2286000000,
+   "iTunes, Software And Service": 18063000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2013,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2013-09-28",
+  "data": {
+   "Wearables, Home and Accessories": 5706000000,
+   "iPad": 31980000000,
+   "iPhone": 91279000000,
+   "Mac": 21483000000,
+   "iPod": 4411000000,
+   "iTunes, Software And Service": 16051000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2012,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2012-09-29",
+  "data": {
+   "iPad": 32424000000,
+   "iPhone": 80477000000,
+   "iPod": 5615000000,
+   "Mac": 23221000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2011,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2011-09-24",
+  "data": {
+   "Desktops": 6439000000,
+   "Other music related products and services": 6314000000,
+   "Peripherals and Other Hardware": 2330000000,
+   "Portables": 15344000000,
+   "Software, service and other net sales": 2954000000,
+   "Total Mac net sales": 21783000000,
+   "iPad and related products and services": 20358000000,
+   "iPhone and related products and services": 47057000000,
+   "iPod": 7453000000
+  }
+ },
+ {
+  "symbol": "AAPL",
+  "fiscalYear": 2010,
+  "period": "FY",
+  "reportedCurrency": "USD",
+  "date": "2010-09-25",
+  "data": {
+   "Retail": 9798000000
+  }
+ }
+]
