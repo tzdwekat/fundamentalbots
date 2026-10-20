@@ -197,7 +197,12 @@ def ingest_holders(conn: psycopg.Connection, cik: int, ticker: str, get=fmp.get,
     if _fresh(conn, "holders", cik, max_age_hours):
         return 0
     rows = []
+    today = today or date.today()
     for y, q in fmp._last_two_quarters(today):
+        quarter_end = date(y, 3 * q, 1) + timedelta(days=31)
+        quarter_end = quarter_end.replace(day=1) - timedelta(days=1)
+        if (today - quarter_end).days < 60:  # 13Fs are due 45 days after quarter end; before that only early filers show
+            continue
         try:
             rows = get("institutional-ownership/extract-analytics/holder", symbol=_sym(ticker), year=y, quarter=q, limit=limit)
         except fmp.FMPError:

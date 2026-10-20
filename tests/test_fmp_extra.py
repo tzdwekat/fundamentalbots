@@ -114,3 +114,20 @@ def test_batch_quotes_and_facts_shapes():
     r = fmp_extra.fetch_ratings("AAPL", get=fake_get)
     assert r == {"date": "2026-10-01", "strong_buy": 6, "buy": 19, "hold": 13, "sell": 3, "strong_sell": 3}
     assert fmp_extra.fetch_treasury_10y(get=fake_get) == (date(2026, 10, 16), 5.09)
+
+
+@pytest.mark.db
+def test_holders_skip_incomplete_quarter(db_conn):
+    asked = []
+
+    def get(path, **params):
+        asked.append((params["year"], params["quarter"]))
+        rows = fx("holders")
+        return [{**r, "date": f"{params['year']}-{'03-31' if params['quarter'] == 1 else '06-30' if params['quarter'] == 2 else '09-30' if params['quarter'] == 3 else '12-31'}"} for r in rows]
+    assert fmp_extra.ingest_holders(db_conn, 320193, "AAPL", get=get, today=date(2026, 10, 19)) == 10
+    assert asked == [(2026, 2)]  # Q3 2026 ended 19 days ago: 13Fs are not due yet, so it is not asked for
+    assert fmp_extra.load_holders(db_conn, 320193)[0]["quarter_end"] == date(2026, 6, 30)
+    with db_conn.cursor() as cur:
+        cur.execute("DELETE FROM holders")
+    db_conn.commit()
+    assert fmp_extra.ingest_holders(db_conn, 320193, "AAPL", get=get, today=date(2026, 12, 15), max_age_hours=0) == 10 and asked[-1] == (2026, 3)

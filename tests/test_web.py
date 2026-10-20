@@ -25,6 +25,7 @@ def client(monkeypatch, db_conn):
     monkeypatch.setattr(views, "refresh_benchmark", lambda conn: None)
     monkeypatch.setattr(views, "refresh_fmp", lambda conn, cik, ticker: None)
     monkeypatch.setattr(views, "live_quotes", lambda conn, tickers: {})
+    monkeypatch.setattr(views.fmp_extra, "fetch_ratings", lambda *a, **k: None)
     monkeypatch.setattr(views, "next_earnings", lambda conn, cik, ticker: date(2026, 11, 2))
     monkeypatch.setattr(views, "list_filings", lambda cik: pd.DataFrame(columns=["accession", "form", "filed", "primary_doc_url"]))
     return TestClient(webapp.app)
@@ -79,7 +80,8 @@ async def test_ticker_page_sections(client, db_conn, fixture_prepare, fmp_fixtur
     for needle in ("<svg", "Outlook", "Bull case", "Bear case", "Apple beats on iPhone", "JP Morgan", "Explain moves", "~$0.0", "Next earnings", "2026-11-02", "-full.html", "Red flags", "ret_3m".replace("ret_3m", "3m")):
         assert needle in r.text, needle
     assert "metric:" in r.text and "evidence/" in r.text  # claim evidence links to the drawer
-    assert "price:2026-" in client.get("/t/AAPL/chart?window=90").text  # the largest moves carry their ids
+    chart = client.get("/t/AAPL/chart?window=90").text
+    assert "price:2026-" in chart and "<th>volume</th>" in chart  # the largest moves carry their ids and relative volume
 
 
 @pytest.mark.db

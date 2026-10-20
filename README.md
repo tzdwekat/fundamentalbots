@@ -121,10 +121,25 @@ refused when the launchd worker already holds the ticker. Reports are served und
 `prepare()` or a model on its own; it refreshes prices, news, grades and the S&P series from stored tables at most
 every six hours.
 
-FMP endpoints in use: analyst estimates, earnings (surprises and the next date), price targets, transcripts, 13F
-summaries, insider statistics, stock news, press releases, analyst grades. Worth adding next, each with its own accuracy
-check: daily prices with volume from FMP instead of yfinance (touches the split-adjusted valuation history), sector and
-industry P/E snapshots for relative valuation, revenue segmentation, dividends.
+FMP data in use (Phase 5c, 2026-10-19), each stored with `fetched_at` and refreshed on its own rule, a failed refresh keeping
+the stored rows: analyst estimates, earnings (surprises and the next report date), price targets, transcripts, 13F
+summaries, insider statistics, stock news and press releases (6 h), analyst grades (6 h), company profile (24 h; sector,
+industry, employees, beta; one line in the personas' snapshot block), peers with trailing multiples (24 h; US listings
+only; the peer-median P/E and EV/sales and our ratio to them are metrics, and the outlook falls back to them when the
+five-year percentile is missing), revenue segments by product and geography (24 h; `seg_<name>_revenue/_share/_yoy`
+metrics at fiscal years, at most 8 and 6 segments), dividends (24 h; TTM per share, yield, 5-year growth), daily volume
+joined to the stored closes (relative volume on the largest moves), insider transactions (6 h) and top 13F holders
+(24 h), Altman Z and Piotroski (24 h; `altman_z_distress` red flag under 1.8 except for financials and REITs), analyst
+rating counts, the 10-year Treasury yield, and one batch quote per overview load (15 min). `fundabot verify T` prints a
+second table comparing our TTM ratios with FMP's (10 % tolerance; a mismatch means look, never that ours is overwritten);
+on AAPL all ten agree within 4 %. The ticker page shows all of it under Peers, Revenue segments, Dividend, Ownership,
+Scores and ratings, and Cross-check.
+
+Bulk and batch endpoints: they reduce the number of API calls, not the bill. FMP is a flat subscription and the
+pipeline makes about fifteen calls per ticker, far below the plan's rate limit; the money goes to model tokens, which
+these endpoints do not touch. The one batch call that earns its place is the overview's batch quote (one call for the
+whole watchlist instead of one per row). Not in use: FMP's own DCF and recommendations (we compute our own), senate and
+house trades, ESG, crowdfunding, commodities, forex, crypto, intraday bars.
 
 ## What the report contains
 

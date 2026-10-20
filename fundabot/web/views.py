@@ -312,6 +312,17 @@ def month_spend(conn) -> tuple[float, float]:
     return spend(conn), float(settings.fundabot_monthly_budget_usd)
 
 
+def ticker_for(conn, cik: int) -> str:
+    with conn.cursor() as cur:
+        cur.execute("SELECT ticker FROM snapshots WHERE cik = %s ORDER BY created_at DESC LIMIT 1", (cik,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        cur.execute("SELECT ticker FROM watchlist WHERE cik = %s", (cik,))
+        row = cur.fetchone()
+    return row[0] if row else ""
+
+
 def refresh_fmp(conn, cik: int, ticker: str) -> None:
     """Profile, peers, segments, dividends, insider trades, holders on their own refresh rules; failures keep stored rows."""
     for step in (fmp_extra.ingest_profile, fmp_extra.ingest_peers, fmp_extra.ingest_segments, fmp_extra.ingest_dividends, fmp_extra.ingest_insider_trades, fmp_extra.ingest_holders):
@@ -352,9 +363,11 @@ def fmp_sections(conn, cik: int, metrics: list[Metric], own_pe: float | None, ow
     cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
     peers = fmp_extra.load_peers(conn, cik)
     own_row = {"peer": "(this company)", "name": "", "pe_ttm": own_pe, "ev_sales_ttm": own_ev_sales, "market_cap": cur.get("market_cap"), "own": True}
+    ratings = fmp_extra.fact(conn, cik, "ratings", lambda: fmp_extra.fetch_ratings(ticker_for(conn, cik)), 6)
     with conn.cursor() as c2:
-        c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key IN ('ratings', 'fmp_crosscheck')) OR (cik = 0 AND key = 'treasury_10y')", (cik,))
+        c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key = 'fmp_crosscheck') OR (cik = 0 AND key = 'treasury_10y')", (cik,))
         facts = dict(c2.fetchall())
+    facts["ratings"] = ratings
     return {"profile": fmp_extra.load_profile(conn, cik), "peers": peers, "peer_rows": ([own_row] + peers) if peers else [],
             "peer_medians": {k: cur.get(k) for k in ("pe_peer_median", "pe_vs_peer_median", "ev_sales_peer_median", "ev_sales_vs_peer_median", "ev_ebitda_peer_median")},
             "segments": segment_table(metrics), "dividends": {k: cur.get(k) for k in ("dividend_per_share_ttm", "dividend_yield", "dividend_growth_5y")},
