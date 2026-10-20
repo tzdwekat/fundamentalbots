@@ -121,7 +121,25 @@ def prepare(conn: psycopg.Connection, ticker: str, force: bool = False) -> str:
         log.warning("transcripts unavailable for %s: %s", ticker, e)
 
     tag_map = periods.load_tag_map()
-    series = periods.build_series(facts, tag_map)
+    edgar_series = periods.build_series(facts, tag_map)
+    from fundabot.analytics import fmp_series as fmp_series_mod
+    from fundabot.ingest import fmp_extra as fmp_extra_mod
+
+    try:
+        fmp_extra_mod.ingest_statements(conn, cik, ticker, force=force)
+    except Exception as e:  # statements are one source of two; EDGAR stands alone when FMP is down
+        log.warning("%s: FMP statements unavailable: %s", ticker, e)
+        conn.rollback()
+    fmp_s = fmp_series_mod.build_fmp_series(fmp_extra_mod.load_statements(conn, cik), filings)
+    if fmp_s:
+        series = fmp_series_mod.merge_series(fmp_s, edgar_series)
+    else:
+        log.warning("%s: no FMP statements stored; fundamentals from EDGAR alone", ticker)
+        series = edgar_series
+    from fundabot.report.verify import crosscheck_edgar
+
+    cc_rows = crosscheck_edgar(fmp_s, edgar_series) if fmp_s else []
+    fmp_extra_mod.fact(conn, cik, "edgar_crosscheck", lambda: {"checked": as_of.isoformat(), "rows": cc_rows, "ok": sum(1 for r in cc_rows if r["ok"]), "total": len(cc_rows)}, 0)
     fundamentals = compute_fundamental_metrics(series)
     val = valuation.compute_valuation(series, facts, prices_df, filings, as_of, fundamentals)
     try:

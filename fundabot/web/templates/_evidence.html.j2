@@ -4,5 +4,6 @@
   {% if e.kind == "news" %}<p class="muted">{{ e.published }} · {{ e.publisher }}</p><p><a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a></p><p>{{ e.text }}</p>
   {% elif e.kind == "filing" %}<p>{{ e.text }} · <a href="{{ e.url }}" target="_blank" rel="noopener">open on EDGAR</a></p>
   {% elif e.kind == "chunk" %}<p class="muted">{{ e.accession }} · {{ e.item }}</p><p class="excerpt">{{ e.text }}</p>
+  {% elif e.kind == "metric" %}<p><code>{{ e.text }}</code></p><p class="muted">source {{ e.source }}{% if e.note %} · {{ e.note }}{% endif %}{% if e.filed %} · {{ e.filed }}{% endif %}{% if e.url %} · <a href="{{ e.url }}" target="_blank" rel="noopener">open filing {{ e.accession }} on EDGAR</a>{% endif %}</p>
   {% else %}<p><code>{{ e.text }}</code></p>{% endif %}
 </div>

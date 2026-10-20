@@ -47,6 +47,16 @@ def fixture_prepare(monkeypatch, db_conn):
     monkeypatch.setattr(fmp_extra, "fetch_scores", lambda *a, **k: None)
     monkeypatch.setattr(fmp_extra, "fetch_treasury_10y", lambda *a, **k: None)
     monkeypatch.setattr(fmp_extra, "fetch_ttm", lambda *a, **k: {})
+    import json as _json
+    from datetime import date as _date
+
+    def fixture_statements(ticker, get=None, **k):  # Phase 5d: FMP statements from fixtures; tests override to {} for the EDGAR-only path
+        out = {}
+        for key in ("income", "balance", "cashflow"):
+            for pt in ("annual", "quarter"):
+                out[f"{key}_{pt}"] = _json.loads((FIX / f"fmp_aapl_{key}_{pt}.json").read_text())
+        return out
+    monkeypatch.setattr(fmp_extra, "fetch_statements", fixture_statements)
     monkeypatch.setattr(edgar_filings, "extract_items", lambda acc, cik, form, filed, company="": (
         {"item1a": (FIX / "sections/aapl_10k_item1a.txt").read_text(), "item7": (FIX / "sections/aapl_10k_item7.txt").read_text()}, True))
     return db_conn
@@ -98,3 +108,38 @@ async def test_report_contains_charts(fixture_prepare, tmp_path):
     assert "## Charts" in html.with_suffix(".md").read_text() or "Charts" in text
     assert text.count("<svg") >= 4 and "Revenue and free cash flow" in text and "Margins and return on capital" in text and "Valuation against its own 5-year range" in text
     assert ".viz-root" in text and "prefers-color-scheme: dark" in text
+
+
+@pytest.mark.db
+def test_prepare_uses_the_more_reliable_source(fixture_prepare):
+    from fundabot.orchestrate import snapshot
+
+    conn = fixture_prepare
+    sid = pipeline.prepare(conn, "AAPL")
+    ms = {f"{m.metric_id}@{m.period}": m for m in snapshot.load_metrics(conn, sid)}
+    rev = ms["revenue@FY2025"]
+    assert rev.formula_id.startswith("xbrl:") and rev.inputs["source_note"] == "confirmed:fmp"  # filed value, confirmed by FMP
+    q4 = ms["revenue@Q4FY2025"]
+    assert q4.formula_id == "fmp:income:revenue" and "derived" not in q4.flags  # reported quarter beats the derived one
+    assert "interest_expense@FY2025" not in ms or ms["interest_expense@FY2025"].value is None  # FMP's zero is not a value
+    with conn.cursor() as cur:
+        cur.execute("SELECT value FROM ticker_facts WHERE cik = 320193 AND key = 'edgar_crosscheck'")
+        cc = cur.fetchone()[0]
+    assert cc["total"] > 100 and cc["ok"] / cc["total"] > 0.85 and all({"item", "period", "fmp", "edgar", "diff", "ok"} <= set(r) for r in cc["rows"])
+    bad = {(r["item"], r["period"]) for r in cc["rows"] if not r["ok"]}
+    assert ("short_term_debt", "FY2025") in bad and ("cash", "Q2FY2026") in bad  # FMP's commercial-paper definition; one FMP cash figure off the filed value
+    std = ms["short_term_debt@FY2025"]
+    assert std.formula_id.startswith("xbrl:") and "source_conflict" in std.flags and std.inputs["source_note"].startswith("conflict:fmp=")  # filed value kept, conflict shown
+    assert ms["cash@Q2FY2026"].value == pytest.approx(45.572e9, rel=1e-3) and "source_conflict" in ms["cash@Q2FY2026"].flags
+
+
+@pytest.mark.db
+def test_prepare_without_fmp_statements_is_edgar_only(fixture_prepare, monkeypatch):
+    from fundabot.ingest import fmp_extra
+    from fundabot.orchestrate import snapshot
+
+    conn = fixture_prepare
+    monkeypatch.setattr(fmp_extra, "fetch_statements", lambda *a, **k: {})
+    sid = pipeline.prepare(conn, "AAPL")
+    base = [m for m in snapshot.load_metrics(conn, sid) if m.formula_id.startswith(("xbrl:", "fmp:income:", "fmp:balance:", "fmp:cashflow:"))]
+    assert base and all(m.formula_id.startswith("xbrl:") for m in base)

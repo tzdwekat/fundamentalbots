@@ -222,7 +222,7 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
             "narrative_estimate": NARRATIVE_ESTIMATE, "stats": None, "chart_svg": None, "moves": [], "outlook": {"label": "insufficient data", "components": {}, "rule": "no data"},
             "narrative": None, "narrative_stale": False, "news": [], "panel": None, "snapshot": None, "ownership": [], "next_earnings": None, "reports": [],
             "on_watchlist": any(e["ticker"] == ticker for e in watchlist.entries(conn)), "profile": None, "peers": [], "peer_rows": [], "peer_medians": {}, "segments": [],
-            "dividends": {}, "dividend_rows": [], "insider_trades": [], "holders": [], "scores": {}, "ratings": None, "crosscheck": None, "risk_free": None}
+            "dividends": {}, "dividend_rows": [], "insider_trades": [], "holders": [], "scores": {}, "ratings": None, "crosscheck": None, "edgar_crosscheck": None, "risk_free": None}
     if cik is None:
         return page
     if refresh:
@@ -285,7 +285,21 @@ def evidence(conn, sid: str, eid: str) -> dict | None:
         metrics = snapshot.load_metrics(conn, sid)
         s = snapshot.load(conn, sid)
         text = claims.evidence_text([eid], metrics, {}, s["accessions"]).get(eid)
-        return {"kind": "metric", "id": eid, "text": text} if text else None
+        if not text:
+            return None
+        mid, _, period = eid.split(":", 1)[1].partition("@")
+        m = next((x for x in metrics if x.metric_id == mid and (not period or x.period == period)), None)
+        acc = (m.inputs or {}).get("accession") if m else None
+        url = filed = None
+        if acc and not str(acc).startswith("fmp:"):
+            with conn.cursor() as cur:
+                cur.execute("SELECT form, filed FROM filings WHERE accession = %s", (acc,))
+                row = cur.fetchone()
+            url = f"https://www.sec.gov/Archives/edgar/data/{str(acc).split('-')[0].lstrip('0')}/{str(acc).replace('-', '')}/"
+            filed = f"{row[0]} filed {row[1]}" if row else acc
+        elif acc:
+            filed = f"filed {str(acc)[4:]} (FMP)"
+        return {"kind": "metric", "id": eid, "text": text, "source": m.formula_id if m else None, "note": (m.inputs or {}).get("source_note") if m else None, "accession": acc, "url": url, "filed": filed}
     if kind == "chunk":
         c = load_chunks(conn, [eid.split(":", 1)[1]]).get(eid.split(":", 1)[1])
         return {"kind": "chunk", "id": eid, "text": c.text, "accession": c.accession, "item": c.item} if c else None
@@ -368,12 +382,12 @@ def fmp_sections(conn, cik: int, ticker: str, metrics: list[Metric], own_pe: flo
     own_row = {"peer": "(this company)", "name": "", "pe_ttm": own_pe, "ev_sales_ttm": own_ev_sales, "market_cap": cur.get("market_cap"), "own": True}
     ratings = fmp_extra.fact(conn, cik, "ratings", lambda: fmp_extra.fetch_ratings(ticker), 6) if refresh else fmp_extra.fact(conn, cik, "ratings", lambda: None, 10**6)
     with conn.cursor() as c2:
-        c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key = 'fmp_crosscheck') OR (cik = 0 AND key = 'treasury_10y')", (cik,))
+        c2.execute("SELECT key, value FROM ticker_facts WHERE (cik = %s AND key IN ('fmp_crosscheck', 'edgar_crosscheck')) OR (cik = 0 AND key = 'treasury_10y')", (cik,))
         facts = dict(c2.fetchall())
     facts["ratings"] = ratings
     return {"profile": fmp_extra.load_profile(conn, cik), "peers": peers, "peer_rows": ([own_row] + peers) if peers else [],
             "peer_medians": {k: cur.get(k) for k in ("pe_peer_median", "pe_vs_peer_median", "ev_sales_peer_median", "ev_sales_vs_peer_median", "ev_ebitda_peer_median")},
             "segments": segment_table(metrics), "dividends": {k: cur.get(k) for k in ("dividend_per_share_ttm", "dividend_yield", "dividend_growth_5y")},
             "dividend_rows": fmp_extra.load_dividends(conn, cik)[:4], "insider_trades": fmp_extra.load_insider_trades(conn, cik, limit=12), "holders": fmp_extra.load_holders(conn, cik),
-            "scores": {"altman_z": cur.get("altman_z"), "piotroski": cur.get("piotroski")}, "ratings": facts.get("ratings"), "crosscheck": facts.get("fmp_crosscheck"),
+            "scores": {"altman_z": cur.get("altman_z"), "piotroski": cur.get("piotroski")}, "ratings": facts.get("ratings"), "crosscheck": facts.get("fmp_crosscheck"), "edgar_crosscheck": facts.get("edgar_crosscheck"),
             "risk_free": facts.get("treasury_10y")}

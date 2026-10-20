@@ -89,3 +89,32 @@ def format_crosscheck(rows: list[dict]) -> str:
         return "" if v is None else f"{v:,.4f}" if abs(v) < 10 else f"{v:,.2f}"
     table = [(r["metric"], f(r["ours"]), f(r["fmp"]), "" if r["diff"] is None else f"{r['diff']:+.1%}" + ("" if r["ok"] else "  <-- CHECK")) for r in rows]
     return pd.DataFrame(table, columns=["metric", "fundabot", "fmp_ttm", "diff"]).to_string(index=False)
+
+
+def crosscheck_edgar(fmp_series: dict, edgar_series: dict, tolerance: float = 0.02, fys: int = 5, quarters: int = 8) -> list[dict]:
+    """FMP's statement lines against EDGAR's filed values for every shared (item, period) in the last `fys` fiscal years
+    and `quarters` quarters. Report only."""
+    rows = []
+    for item in sorted(set(fmp_series) & set(edgar_series)):
+        f, e = fmp_series[item], edgar_series[item]
+        if f is None or e is None or f.empty or e.empty:
+            continue
+        latest_fy = int(max(f.fy.max(), e.fy.max()))
+        fy_keep = set(range(latest_fy - fys + 1, latest_fy + 1))
+        q_keep = set(zip(*[list(x) for x in zip(*sorted(((r.fy, r.fq) for r in e.itertuples(index=False) if r.fq >= 1), key=lambda t: (t[0], t[1]))[-quarters:])])) if (e.fq >= 1).any() else set()
+        q_keep = {(fy, fq) for fy, fq in q_keep} if q_keep else set()
+        fi = {(r.fy, r.fq): float(r.value) for r in f.itertuples(index=False)}
+        for r in e.itertuples(index=False):
+            key = (r.fy, r.fq)
+            if key not in fi or not ((r.fq == 0 and r.fy in fy_keep) or (r.fq >= 1 and key in q_keep)):
+                continue
+            ev, fv = float(r.value), fi[key]
+            diff = (fv / ev - 1) if ev else None
+            rows.append({"item": item, "period": r.period, "fmp": fv, "edgar": ev, "diff": diff, "ok": None if diff is None else abs(diff) <= tolerance})
+    return rows
+
+
+def format_edgar_check(rows: list[dict]) -> str:
+    table = [(r["item"], r["period"], f"{r['fmp']:,.0f}" if abs(r["fmp"]) >= 1000 else f"{r['fmp']:,.4f}", f"{r['edgar']:,.0f}" if abs(r["edgar"]) >= 1000 else f"{r['edgar']:,.4f}",
+              "" if r["diff"] is None else f"{r['diff']:+.1%}" + ("" if r["ok"] else "  <-- CHECK")) for r in rows]
+    return pd.DataFrame(table, columns=["item", "period", "fmp", "edgar", "diff"]).to_string(index=False)

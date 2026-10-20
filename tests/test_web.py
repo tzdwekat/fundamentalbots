@@ -284,3 +284,28 @@ def test_overview_quotes(client, db_conn, monkeypatch):
     monkeypatch.setattr(views, "live_quotes", lambda conn, tickers: {"AAPL": {"price": 342.94, "change_pct": -0.1514, "year_high": 348.15, "year_low": 243.42}})
     r = client.get("/")
     assert r.status_code == 200 and "342.94" in r.text and "-0.15%" in r.text and "day" in r.text
+
+
+@pytest.mark.db
+async def test_evidence_metric_links_filing_and_shows_source(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); sid = cur.fetchone()[0]
+    r = client.get(f"/evidence/{sid}/metric:revenue@FY2025")
+    assert r.status_code == 200 and "source" in r.text.lower() and "xbrl:" in r.text and "sec.gov" in r.text and "0000320193-25-000079" in r.text
+    r2 = client.get(f"/evidence/{sid}/metric:revenue@Q4FY2025")
+    assert "fmp:income:revenue" in r2.text
+
+
+@pytest.mark.db
+def test_page_shows_edgar_crosscheck(client, db_conn):
+    from psycopg.types.json import Jsonb as J
+
+    seed_watch(db_conn)
+    seed_prices(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO ticker_facts (cik, key, value) VALUES (320193, 'edgar_crosscheck', %s)",
+                    (J({"checked": "2026-10-19", "ok": 41, "total": 42, "rows": [{"item": "short_term_debt", "period": "FY2025", "fmp": 20.3e9, "edgar": 12.4e9, "diff": 0.637, "ok": False}]}),))
+    db_conn.commit()
+    r = client.get("/t/AAPL")
+    assert "FMP vs EDGAR" in r.text and "41 of 42" in r.text and "short_term_debt@FY2025" in r.text

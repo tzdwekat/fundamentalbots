@@ -62,6 +62,8 @@
   {% if crosscheck %}<p>{{ crosscheck.ok }} of {{ crosscheck.total }} within 10% <span class="muted">({{ crosscheck.checked }})</span>
     {% for r in crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.metric }}: ours {{ r.ours|num }} vs FMP {{ r.fmp|num }} ({{ r.diff|pct }})</span>{% endfor %}</p>
   {% else %}<p class="muted">No cross-check yet (runs at Refresh data).</p>{% endif %}
+  {% if edgar_crosscheck %}<p>FMP vs EDGAR statement lines: {{ edgar_crosscheck.ok }} of {{ edgar_crosscheck.total }} within 2% <span class="muted">({{ edgar_crosscheck.checked }}; the filed value is used when both agree, the reported quarter when EDGAR's is derived, and conflicts are flagged)</span>
+    {% for r in edgar_crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.item }}@{{ r.period }}: FMP {{ r.fmp|num(0) }} vs EDGAR {{ r.edgar|num(0) }} ({{ r.diff|pct }})</span>{% endfor %}</p>{% endif %}
 
   <h2>Decision panel</h2>
   {% if panel %}

@@ -72,6 +72,15 @@ def verify(ticker: str):
     typer.echo(cross_check(ticker, metrics))
     typer.echo("\nFMP TTM cross-check (10% tolerance; a mismatch means look, not that ours is wrong):")
     typer.echo(format_crosscheck(crosscheck_fmp(metrics, fmp_extra.fetch_ttm(ticker))))
+    from fundabot.report.verify import format_edgar_check
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT value FROM ticker_facts WHERE cik = (SELECT cik FROM snapshots WHERE id = %s) AND key = 'edgar_crosscheck'", (sid,))
+        row = cur.fetchone()
+    if row and row[0] and row[0].get("rows"):
+        cc = row[0]
+        typer.echo(f"\nFMP vs EDGAR statement lines (2% tolerance): {cc['ok']} of {cc['total']} agree")
+        typer.echo(format_edgar_check([r for r in cc["rows"] if not r["ok"]]) if any(not r["ok"] for r in cc["rows"]) else "all agree")
 
 
 JUDGE_MAX_TOKENS = 20000  # a judge scores every surviving claim (70+ on a full run) with notes

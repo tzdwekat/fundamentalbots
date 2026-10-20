@@ -52,3 +52,20 @@ def test_crosscheck_reports_but_never_alters():
     assert all(r["ok"] is None for r in missing if r["metric"] == "pe")  # no value on our side: not a mismatch, just unchecked
     text = verify.format_crosscheck(verify.crosscheck_fmp(ms, ttm()))
     assert "CHECK" in text and "pe" in text
+
+
+def test_crosscheck_edgar_rows_and_tolerance():
+    import pandas as pd
+
+    from fundabot.analytics import periods
+
+    def frame(rows):
+        return pd.DataFrame(rows, columns=periods.COLUMNS)
+    r = lambda fy, fq, v, tag: (f"FY{fy}" if fq == 0 else f"Q{fq}FY{fy}", fy, fq, None, __import__("datetime").date(fy, 9, 27), v, "a", tag, False, False, False)
+    fmp_s = {"revenue": frame([r(2025, 0, 101.0, "fmp:income:revenue"), r(2024, 0, 90.0, "fmp:income:revenue"), r(2015, 0, 50.0, "fmp:income:revenue")]), "cash": frame([r(2025, 0, 10.0, "fmp:balance:cashAndCashEquivalents")])}
+    edgar_s = {"revenue": frame([r(2025, 0, 100.0, "Revenues"), r(2024, 0, 95.0, "Revenues"), r(2015, 0, 50.0, "Revenues")]), "equity": frame([r(2025, 0, 5.0, "StockholdersEquity")])}
+    rows = {(x["item"], x["period"]): x for x in verify.crosscheck_edgar(fmp_s, edgar_s)}
+    assert rows[("revenue", "FY2025")]["ok"] is True and rows[("revenue", "FY2025")]["diff"] == pytest.approx(0.01)
+    assert rows[("revenue", "FY2024")]["ok"] is False and rows[("revenue", "FY2024")]["diff"] == pytest.approx(-90 / 95 + 1, abs=1e-9) or rows[("revenue", "FY2024")]["diff"] == pytest.approx(90 / 95 - 1)
+    assert ("revenue", "FY2015") not in rows and ("cash", "FY2025") not in rows and ("equity", "FY2025") not in rows  # outside the window / not shared
+    assert "CHECK" in verify.format_edgar_check(list(rows.values()))
