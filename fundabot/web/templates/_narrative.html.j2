@@ -9,6 +9,6 @@
 {% else %}<p class="muted">No narrative for this window yet.</p>{% endif %}
 <form hx-post="/t/{{ ticker }}/narrative" hx-target="#narrative" class="inline">
   <input type="hidden" name="window" value="{{ window_days }}">
-  <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select>
+  <select name="profile">{% for p in profiles() %}<option value="{{ p }}" {{ "selected" if p == default_profile() }}>{{ p }}</option>{% endfor %}</select>
   <button class="small">{{ "Explain moves again" if narrative else "Explain moves" }} <span class="est">~${{ "%.2f"|format(narrative_estimate) }}</span></button>
 </form>

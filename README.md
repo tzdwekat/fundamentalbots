@@ -72,7 +72,10 @@ through on HALO; a mean of 4 escalates 36-40% but passes 10-12 claims the previo
 rule stays "any screen judge at 4" (`judge.ESCALATE_MATERIALITY`); the larger saving comes from running one provider
 (see profiles below).
 
-Provider profiles (2026-10-19): `fundabot/profiles.yaml` maps each role (personas and their rebuttals, screen judge
+Provider profiles (2026-10-19): the default profile is `anthropic` (`FUNDABOT_PROFILE` in `.env`; the most reliable on
+the stored runs: 0.6% of its numbers fail the grounding check against 6.9% for OpenAI and 6.6% for Gemini, no failed
+cells, and judges rate its claims highest). Set `FUNDABOT_PROFILE=openai|gemini|multi` to change it everywhere, or pass
+`--profile` / pick it on a page for one run. `fundabot/profiles.yaml` maps each role (personas and their rebuttals, screen judge
 panel, escalation judge panel, guidance extraction) to provider and model; `--profile` picks one at run time and the
 pipeline is otherwise identical. `multi` is the three-provider layout above. `--providers` defaults to the profile's providers
 (all of them on `--full`, the first one on a cheap run). `anthropic`, `openai` and `gemini` run the

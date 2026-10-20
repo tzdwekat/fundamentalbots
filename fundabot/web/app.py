@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fundabot import profiles
+from fundabot.config import settings
 from fundabot.analytics import moves
 from fundabot.eval import review
 from fundabot.orchestrate import watchlist
@@ -20,7 +21,7 @@ HERE = Path(__file__).parent
 app = FastAPI(title="fundabot")
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(env=jinja2.Environment(loader=jinja2.FileSystemLoader(HERE / "templates"), autoescape=True))  # .j2 files are not auto-detected as HTML
-templates.env.globals.update(viz_css=charts.VIZ_CSS, profiles=profiles.names, estimates=profiles.estimates)
+templates.env.globals.update(viz_css=charts.VIZ_CSS, profiles=profiles.names, estimates=profiles.estimates, default_profile=lambda: settings.fundabot_profile)
 
 
 def pct(v, digits=1):
@@ -84,7 +85,8 @@ def narrative_get(request: Request, ticker: str, window: int = Query(90)):
 
 
 @app.post("/t/{ticker}/narrative", response_class=HTMLResponse)
-async def narrative_post(request: Request, ticker: str, window: int = Form(90), profile: str = Form("multi")):
+async def narrative_post(request: Request, ticker: str, window: int = Form(90), profile: str = Form("")):
+    profile = profile or settings.fundabot_profile
     window = _window(window)
     with views.connect() as conn:
         cik = views.cik_for(conn, ticker)
@@ -117,7 +119,8 @@ def evidence(request: Request, snapshot_id: str, eid: str):
 
 
 @app.post("/jobs", response_class=HTMLResponse)
-def job_start(request: Request, response: Response, ticker: str = Form(...), kind: str = Form(...), profile: str = Form("multi")):
+def job_start(request: Request, response: Response, ticker: str = Form(...), kind: str = Form(...), profile: str = Form("")):
+    profile = profile or settings.fundabot_profile
     try:
         job_id = jobs.start(kind, ticker, profile)
     except jobs.JobRefused as e:

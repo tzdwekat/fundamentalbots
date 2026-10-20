@@ -138,6 +138,6 @@ def test_output_budgets_for_gemini_and_judges(monkeypatch):
     from fundabot.cli import build_adapters
 
     monkeypatch.setattr(settings, "gemini_api_key", "k")
-    adapters, screen, judges, _ = build_adapters(full=True, providers="", model="claude-sonnet-5-5", judges=3)
+    adapters, screen, judges, _ = build_adapters(full=True, providers="", model="claude-sonnet-5-5", judges=3, profile="multi")
     assert next(a for a in adapters if a.provider == "gemini").max_tokens >= 16000  # thinking tokens count against the cap
     assert all(j.max_tokens >= 16000 for j in screen + judges)  # ~70 scored claims plus notes exceed 8k

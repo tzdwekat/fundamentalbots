@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     edgar_user_agent: str = "fundabot unknown@example.com"
     database_url: str = "postgresql://fundabot:fundabot@localhost:5433/fundabot"
     fundabot_monthly_budget_usd: float = 100.0
+    fundabot_profile: str = "anthropic"  # default provider profile (fundabot/profiles.yaml): anthropic | openai | gemini | multi
     cache_dir: Path = Path(".cache")
 
 

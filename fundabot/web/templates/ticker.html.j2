@@ -14,15 +14,15 @@
   <div class="actions">
     {% if next_earnings %}<span class="pill">Next earnings {{ next_earnings }}</span>{% endif %}
     {% if running %}<span class="running">job running</span>{% endif %}
-    <form hx-post="/jobs" hx-target="#job" class="inline"><input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="refresh"><input type="hidden" name="profile" value="multi"><button class="small">Refresh data (free)</button></form>
+    <form hx-post="/jobs" hx-target="#job" class="inline"><input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="refresh"><input type="hidden" name="profile" value="{{ default_profile() }}"><button class="small">Refresh data (free)</button></form>
     <form hx-post="/jobs" hx-target="#job" class="inline">
       <input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="cheap">
-      <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }} ~${{ "%.2f"|format(estimates(p).cheap) }}</option>{% endfor %}</select>
+      <select name="profile">{% for p in profiles() %}<option value="{{ p }}" {{ "selected" if p == default_profile() }}>{{ p }} ~${{ "%.2f"|format(estimates(p).cheap) }}</option>{% endfor %}</select>
       <button class="small">Analyze cheap</button>
     </form>
     <form hx-post="/jobs" hx-target="#job" class="inline">
       <input type="hidden" name="ticker" value="{{ ticker }}"><input type="hidden" name="kind" value="full">
-      <select name="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }} ~${{ "%.2f"|format(estimates(p).full) }}</option>{% endfor %}</select>
+      <select name="profile">{% for p in profiles() %}<option value="{{ p }}" {{ "selected" if p == default_profile() }}>{{ p }} ~${{ "%.2f"|format(estimates(p).full) }}</option>{% endfor %}</select>
       <button class="small">Analyze full</button>
     </form>
     <div id="job"></div>

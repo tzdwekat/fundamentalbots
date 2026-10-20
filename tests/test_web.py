@@ -212,3 +212,13 @@ def test_edgar_outage_still_renders(client, db_conn, monkeypatch):
     monkeypatch.setattr(views, "list_filings", boom)
     r = client.get("/t/AAPL?window=90")
     assert r.status_code == 200 and "<svg" in r.text
+
+
+@pytest.mark.db
+def test_pages_preselect_the_settings_profile(client, db_conn, monkeypatch):
+    from fundabot.config import settings
+
+    seed_watch(db_conn)
+    assert 'value="anthropic" selected' in client.get("/t/AAPL").text and "default profile" in client.get("/").text
+    monkeypatch.setattr(settings, "fundabot_profile", "openai")
+    assert 'value="openai" selected' in client.get("/t/AAPL").text

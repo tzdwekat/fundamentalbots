@@ -6,7 +6,8 @@
   <input name="ticker" placeholder="ticker" required pattern="[A-Za-z.\-]{1,6}"> <button name="action" value="add">Add</button>
 </form>
 <form class="inline" id="profile-form">
-  <label>profile <select name="profile" id="profile">{% for p in profiles() %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+  <label>profile <select name="profile" id="profile">{% for p in profiles() %}<option value="{{ p }}" {{ "selected" if p == default_profile() }}>{{ p }}</option>{% endfor %}</select></label>
+  <span class="muted">default profile <code>{{ default_profile() }}</code> (FUNDABOT_PROFILE in .env)</span>
 </form>
 <table class="list">
 <thead><tr><th>ticker</th><th>close</th><th>1m</th><th>3m</th><th>6m</th><th>outlook</th><th>composite</th><th>verdict</th><th>queue</th><th>analyze</th></tr></thead>
@@ -22,8 +23,8 @@
   <td class="jobs">
     {% for kind in ("cheap", "full") %}
     <form hx-post="/jobs" hx-target="#job-{{ r.ticker }}" hx-swap="innerHTML" class="inline">
-      <input type="hidden" name="ticker" value="{{ r.ticker }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="profile" value="multi" class="profile-field">
-      <button class="small">Analyze {{ kind }} <span class="est">~${{ "%.2f"|format(estimates("multi")[kind]) }}</span></button>
+      <input type="hidden" name="ticker" value="{{ r.ticker }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="profile" value="{{ default_profile() }}" class="profile-field">
+      <button class="small">Analyze {{ kind }} <span class="est">~${{ "%.2f"|format(estimates(default_profile())[kind]) }}</span></button>
     </form>
     {% endfor %}
     <form method="post" action="/watchlist" class="inline"><input type="hidden" name="ticker" value="{{ r.ticker }}"><button name="action" value="remove" class="small muted">remove</button></form>

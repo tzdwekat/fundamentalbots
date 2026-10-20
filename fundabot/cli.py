@@ -218,7 +218,7 @@ def web(host: str = "127.0.0.1", port: int = 8787, reload: bool = False):
 
 
 @app.command("judge-ab")
-def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "reports", profile: str = "multi"):
+def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "reports", profile: str = ""):
     """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""
     import asyncio
     from pathlib import Path
@@ -242,7 +242,7 @@ def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "r
     else:  # the previous pipeline's round-2 rows (no _escalated marker) are about to be overwritten: keep their per-claim means
         rows = [j for j in judge.load_judgements(conn, sid, 2) if "_escalated" not in j["output"]]
         baseline = judge.mean_scores(rows, sorted({c["claim_id"] for j in rows for c in j["output"]["claims"]}))
-    adapters, screen_judges, judge_adapters, _ = build_adapters(True, "", None, judges, profile=profile)
+    adapters, screen_judges, judge_adapters, _ = build_adapters(True, "", None, judges, profile=profile or None)
     asyncio.run(analyze_full(conn, ticker, PERSONAS_ALL, adapters, screen_judges, judge_adapters, OpenAIEmbedder(), out_dir=Path(out_dir), run_kind="triage", snapshot_id=sid))
     with conn.cursor() as cur:
         cur.execute("UPDATE verdicts SET verdict = verdict || %s WHERE snapshot_id = %s AND run_kind = 'triage' RETURNING verdict", (Jsonb({"baseline_claim_means": baseline}), sid))
@@ -253,6 +253,7 @@ def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "r
 
 
 from fundabot import profiles as _profiles  # noqa: E402
+from fundabot.config import settings  # noqa: E402
 
 _MULTI = _profiles.load("multi")
 JUDGE_MODELS = _MULTI["escalation"]  # the strong panel (views of the `multi` profile; see fundabot/profiles.yaml)
@@ -262,12 +263,13 @@ SCREEN_MODELS = _MULTI["screen"]  # --tier screen: cheap personas, same judges
 SCREEN_JUDGE_MODELS = SCREEN_MODELS  # the screen panel: one cheap judge per provider scores every claim first
 
 
-def build_adapters(full: bool, providers: str, model: str | None, judges: int, tier: str = "default", profile: str = "multi"):
+def build_adapters(full: bool, providers: str, model: str | None, judges: int, tier: str = "default", profile: str | None = None):
     """(persona adapters, screen judges, escalation judges, guidance adapter) from the profile. The judge panels are empty
     unless --full; --providers narrows the persona set within the profile; --judges 1 keeps each panel's first provider;
     --model overrides the Anthropic persona model. Missing keys fail here, loudly."""
     if tier not in ("default", "screen"):
         raise typer.BadParameter("--tier must be default or screen")
+    profile = profile or settings.fundabot_profile  # FUNDABOT_PROFILE in .env; --profile overrides per run
     try:
         prof = _profiles.load(profile)
     except KeyError as e:
@@ -296,7 +298,7 @@ def build_adapters(full: bool, providers: str, model: str | None, judges: int, t
 
 @app.command()
 def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro", model: str = "claude-sonnet-5-5",
-            providers: str = "", full: bool = False, judges: int = 3, tier: str = "default", profile: str = "multi",
+            providers: str = "", full: bool = False, judges: int = 3, tier: str = "default", profile: str = "",
             open_report: bool = typer.Option(False, "--open"), force: bool = False, rerun: bool = False, out_dir: str = "reports"):
     """Run the persona agents over a fresh snapshot and write a report. --full: 3 providers, rebuttal round, judges, verdict."""
     import asyncio
@@ -309,7 +311,7 @@ def analyze(tickers: list[str], personas: str = "bull,bear,skeptic,quality,macro
 
     conn, embedder = connect(), OpenAIEmbedder()
     names = [p.strip() for p in personas.split(",") if p.strip()]
-    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile)
+    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile or None)
     for t in tickers:
         try:
             if full:
@@ -355,7 +357,7 @@ def watch_list():
         typer.echo(f"{e['ticker']:<8} cik {e['cik']:<10} added {e['added_at']:%Y-%m-%d}  last poll {e['last_poll'] or '-'}  {e['note'] or ''}")
 
 
-def scan_runner(full: bool, providers: str = "", model: str | None = None, judges: int = 3, tier: str = "default", profile: str = "multi"):
+def scan_runner(full: bool, providers: str = "", model: str | None = None, judges: int = 3, tier: str = "default", profile: str = ""):
     """A runner that opens its own DB connection per ticker (connections are not safe to share across concurrent tickers)."""
     import json
     from pathlib import Path
@@ -364,7 +366,7 @@ def scan_runner(full: bool, providers: str = "", model: str | None = None, judge
     from fundabot.orchestrate.pipeline import analyze as run, analyze_full
     from fundabot.retrieval.embed import OpenAIEmbedder
 
-    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile)
+    adapters, screen_judges, judge_adapters, guidance_adapter = build_adapters(full, providers, model, judges, tier, profile or None)
 
     async def runner(ticker: str, full_run: bool, force: bool = False) -> dict:
         conn = connect()
@@ -387,7 +389,7 @@ PERSONAS_ALL = ["bull", "bear", "skeptic", "quality", "macro"]
 
 @app.command()
 def scan(watchlist_flag: bool = typer.Option(False, "--watchlist"), tickers: str = "", full: bool = False, max_usd: float = 100.0,
-         providers: str = "", concurrency: int = 3, tier: str = "default", profile: str = "multi"):
+         providers: str = "", concurrency: int = 3, tier: str = "default", profile: str = ""):
     """Analyze many tickers (cheap run by default, --full for the debate), stalest first, under a per-scan budget."""
     import asyncio
 
@@ -427,7 +429,7 @@ def poll(dry_run: bool = False):
 
 
 @app.command()
-def worker(limit: int = 1, providers: str = "", tier: str = "default", profile: str = "multi"):
+def worker(limit: int = 1, providers: str = "", tier: str = "default", profile: str = ""):
     """Run queued full analyses whose wait has elapsed."""
     import asyncio
 
