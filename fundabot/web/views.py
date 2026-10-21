@@ -244,7 +244,6 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page["narrative_dropped"] = row["dropped"] if row else 0
     page["narrative_stale"] = moves.stale(conn, cik, window_days, moves.inputs_sha(inputs))
     page["news"] = news.load(conn, cik, news_days, until=stats.get("asof") or date.today())
-    page["panel"] = panel_for(conn, ticker)
     page["metrics_snapshot_id"] = snap["id"] if snap else None
     cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
     page.update(fmp_sections(conn, cik, ticker, metrics, cur.get("pe"), cur.get("ev_sales"), refresh=refresh))

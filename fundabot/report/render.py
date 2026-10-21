@@ -18,8 +18,10 @@ CSS = "body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1100p
 
 
 def _footnote_links(md: str) -> str:
-    """[1,2] markers become anchors into the Sources list."""
-    return re.sub(r"\[(\d+(?:,\d+)*)\]", lambda m: " ".join(f'<a class="fn" href="#src-{n}">[{n}]</a>' for n in m.group(1).split(",")), md)
+    """[1,2] markers in the note body become anchors into the Sources list; the appendix (quoted text, the list itself) is left alone."""
+    body, sep, appendix = md.partition("# Appendix")
+    linked = re.sub(r"\[(\d+(?:,\d+)*)\]", lambda m: " ".join(f'<a class="fn" href="#src-{n}">[{n}]</a>' for n in m.group(1).split(",")), body)
+    return linked + sep + appendix
 
 
 def _render_note(ticker, snapshot, metrics, flags, verdict, analyses, chunks_by_id, filings, out_dir: Path, run_kind: str, extras: dict | None, suffix: str) -> tuple[Path, Path]:

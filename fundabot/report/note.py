@@ -1,5 +1,7 @@
 """The analyst note: sections in the analyst's order, each fact a sentence from a template over a stored value, with
 footnotes to the source. Nothing here calls a model or a network; the only model text is quoted and attributed."""
+import json
+
 from fundabot.agents.context import metric_line
 from fundabot.analytics.metrics import Metric
 from fundabot.analytics.valuation import DISCOUNT_RATE, TERMINAL_GROWTH, YEARS
@@ -16,11 +18,10 @@ def lookup(metrics: list[Metric]) -> dict:
 
 
 def _tone(value: float, tone: str | None) -> str | None:
-    if tone is None:
-        return None
-    if tone in GOOD_UP:
+    """Only a change has a direction: growth rates colour by sign; levels (a margin, a multiple) carry no colour here."""
+    if tone == "growth":
         return "good" if value > 0 else "bad" if value < 0 else "neutral"
-    return "neutral"
+    return None
 
 
 def fact(lk: dict, mid: str, period: str, template: str, tone: str | None = None, extra_ids: list[str] | None = None) -> dict | None:
@@ -53,17 +54,20 @@ class Footnotes:
             by_id.setdefault(f"metric:{m.metric_id}", m)
         out = []
         for n, eid in enumerate(self.order, 1):
-            text, url = eid, None
+            text, url, inputs = eid, None, ""
             if eid.startswith("metric:"):
                 m = by_key.get(eid) or by_id.get(eid)
                 if m is not None:
                     text = metric_line(m)
-                    url = urls.get((m.inputs or {}).get("accession"))
+                    inp = dict(m.inputs or {})
+                    acc = inp.pop("accession", None) or next((v.get("accession") for v in inp.values() if isinstance(v, dict) and v.get("accession")), None)
+                    url = urls.get(acc)
+                    inputs = json.dumps({k: v for k, v in inp.items() if k not in ("start", "end")}, default=str)[:300] if inp else ""
             elif eid.startswith("chunk:"):
                 c = (chunks_by_id or {}).get(eid.split(":", 1)[1])
                 if c is not None:
                     text, url = c.text, urls.get(c.accession)
-            out.append({"n": n, "id": eid, "text": text, "url": url})
+            out.append({"n": n, "id": eid, "text": text, "url": url, "inputs": inputs})
         return out
 
 
@@ -114,14 +118,21 @@ def _simple_rows(lk, mids, periods):
     return rows
 
 
-def _delta_text(lk, mid, fys):
+def _delta(lk, mid, fys):
     if len(fys) < 2:
-        return ""
+        return None
     a, b = lk.get((mid, fys[0])), lk.get((mid, fys[-1]))
     if a is None or b is None or a.value is None or b.value is None:
+        return None
+    return b.value - a.value
+
+
+def _delta_text(lk, mid, fys):
+    d = _delta(lk, mid, fys)
+    if d is None:
         return ""
-    d = (b.value - a.value) * 100
-    return f", {'up' if d >= 0 else 'down'} {abs(d):.1f} points since {fys[0]}"
+    pts = abs(d) * 100
+    return f", {'up' if d >= 0 else 'down'} {pts:.1f} point{'' if round(pts, 1) == 1.0 else 's'} since {fys[0]}"
 
 
 def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdict: dict | None, analyses: list[dict], extras: dict | None,
@@ -153,8 +164,11 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
                 "price_date": snapshot.get("price_date"), "market_cap": labels.fmt(cur["market_cap"].value, "usd") if "market_cap" in cur and cur["market_cap"].value else None,
                 "composite": composite, "reading": reading(composite, agreement, cheap=verdict is None), "veto_note": (verdict or {}).get("veto_note"),
                 "outlook": extras.get("outlook_label"), "anchors": [], "facts": []}
-    for mid, p, tpl, tone in ((f"revenue_yoy", q, "Revenue {v} vs a year ago ({p})", "growth"), ("pe", "current", "P/E {v}", None), ("fcf_yield", "current", "FCF yield {v}", "yield")):
+    rv = lk.get(("revenue_yoy", q)) if q else None
+    for mid, p, tpl, tone in (("revenue_yoy", q, ("Revenue up {v} vs a year ago ({p})" if rv is not None and rv.value is not None and rv.value >= 0 else "Revenue down {v} vs a year ago ({p})"), "growth"), ("pe", "current", "P/E {v}", None), ("fcf_yield", "current", "FCF yield {v}", None)):
         f = fact(lk, mid, p, tpl, tone) if p else None
+        if f and mid == "revenue_yoy":
+            f["text"] = f["text"].replace("down -", "down ")
         if f:
             pct = lk.get(("pe_5y_percentile", "current"))
             if mid == "pe" and pct is not None and pct.value is not None:
@@ -183,12 +197,23 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
         "capital_allocation": _simple_rows(lk, ["net_buybacks", "dividend_coverage", "acquisitions_to_ocf", "dividend_per_share_ttm", "dividend_yield", "dividend_growth_5y", "shares_outstanding"], ([fys[-1]] if fys else []) + ["current"])}}
     if fy:
         add(finances, fact(lk, "revenue", fy, "Revenue {v} in {p}"))
-        for mid in ("operating_margin", "net_margin"):
-            f = fact(lk, mid, fy, "{l} {v} in {p}", "margin")
+        for mid in ("operating_margin", "net_margin", "roic"):
+            f = fact(lk, mid, fy, "{l} {v} in {p}")
             if f:
+                d = _delta(lk, mid, fys[-5:])
                 f["text"] += _delta_text(lk, mid, fys[-5:])
+                f["tone"] = None if d is None else "good" if d > 0 else "bad" if d < 0 else "neutral"  # the change carries the colour, not the level
+                if d is not None:
+                    f["ids"].append(f"metric:{mid}@{fys[-5:][0]}")
                 add(finances, f)
-        add(finances, fact(lk, "roic", fy, "{l} {v} in {p}", "return"))
+        nd = fact(lk, "net_debt", fy, "Net debt {v} in {p}")
+        prev = lk.get(("net_debt", fys[-2])) if len(fys) >= 2 else None
+        if nd and prev is not None and prev.value is not None:
+            cur_v = lk[("net_debt", fy)].value
+            nd["text"] += f", {'up' if cur_v > prev.value else 'down'} from {labels.fmt(prev.value, 'usd')} in {fys[-2]}"
+            nd["tone"] = "bad" if cur_v > prev.value else "good" if cur_v < prev.value else "neutral"
+            nd["ids"].append(f"metric:net_debt@{fys[-2]}")
+        add(finances, nd)
         add(finances, fact(lk, "net_debt_to_ebitda", fy, "Net debt is {v} EBITDA in {p}"))
         add(finances, fact(lk, "fcf_to_net_income", fy, "Free cash flow is {v} net income in {p}"))
 
@@ -201,7 +226,7 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
         bears = [c for c in verdict.get("consensus_claims", []) if c["direction"] == "negative"] + [c for c in verdict.get("contested_claims", []) if c["direction"] == "negative"]
     else:
         bears = sorted((dict(c, agent=a["agent"]) for a in analyses for c in (a.get("grounded") or {}).get("claims", []) if c["direction"] == "negative"), key=lambda c: -c.get("weight", 0))
-    red["bears"] = [_claim_view(c, fn) for c in bears[:5]]
+    red["bears"] = [_claim_view(c, fn) for c in bears[:3]]  # the full bear case is in The debate
 
     # ---- strategy
     strategy = {"title": "Strategy", "facts": [], "narrative": (extras.get("narrative") or {}).get("one_line")}
@@ -232,9 +257,10 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
         parts, ids = [f"{lab} {labels.fmt(m.value, k)}"], [f"metric:{mid}@current"]
         lo, med, hi, pct = (lk.get((f"{mid}_5y_{s}", "current")) for s in ("min", "median", "max", "percentile"))
         if med is not None and med.value is not None:
-            rng = f" (5-year range {labels.fmt(lo.value, k)}–{labels.fmt(hi.value, k)}" if lo is not None and hi is not None and lo.value is not None and hi.value is not None else " (5-year range"
-            parts.append(f"against a 5-year median of {labels.fmt(med.value, k)}{rng if rng.endswith(')') else rng + ')'}" + (f", {pct.value * 100:.0f}th percentile" if pct is not None and pct.value is not None else ""))
-            ids += [f"metric:{mid}_5y_median@current"] + ([f"metric:{mid}_5y_percentile@current"] if pct is not None and pct.value is not None else [])
+            have_range = lo is not None and hi is not None and lo.value is not None and hi.value is not None
+            rng = f" (5-year range {labels.fmt(lo.value, k)}–{labels.fmt(hi.value, k)})" if have_range else ""
+            parts.append(f"against a 5-year median of {labels.fmt(med.value, k)}{rng}" + (f", {pct.value * 100:.0f}th percentile" if pct is not None and pct.value is not None else ""))
+            ids += [f"metric:{mid}_5y_median@current"] + ([f"metric:{mid}_5y_min@current", f"metric:{mid}_5y_max@current"] if have_range else []) + ([f"metric:{mid}_5y_percentile@current"] if pct is not None and pct.value is not None else [])
         rel = lk.get((f"{mid}_vs_peer_median", "current"))
         pm = lk.get((f"{mid}_peer_median", "current"))
         if rel is not None and rel.value is not None and pm is not None and pm.value is not None:
@@ -260,7 +286,8 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
         bear = [c for c in verdict.get("consensus_claims", []) if c["direction"] == "negative"][:5]
         contested = verdict.get("contested_claims", [])[:2]
         subs = {k: verdict.get(k) for k in ("quality_score", "value_score", "earnings_momentum_score", "accounting_risk_score")}
-        subscores_text = ", ".join(f"{k.replace('_score', '').replace('_', ' ')} {v}" for k, v in subs.items() if v is not None) + " (0–100)"
+        joined = ", ".join(f"{k.replace('_score', '').replace('_', ' ')} {v}" for k, v in subs.items() if v is not None)
+        subscores_text = joined + " (0–100)" if joined else ""
         debate = {"title": "The debate", "bull": [_claim_view(c, fn) for c in bull], "bear": [_claim_view(c, fn) for c in bear], "contested": [_claim_view(c, fn) for c in contested],
                   "summary": verdict.get("one_paragraph_summary") or None, "median_judge": verdict.get("median_judge"), "subscores_text": subscores_text}
     else:
@@ -273,8 +300,9 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
     run_details = []
     if verdict:
         run_details.append("Providers: " + ", ".join(verdict.get("providers", [])) + ".")
-        run_details.append("Screen panel: " + ", ".join(f"{j['provider']}/{j['model']}" for j in verdict.get("screen_judges", [])) + "; escalation panel: " + ", ".join(f"{j['provider']}/{j['model']}" for j in verdict.get("judges", [])) + ".")
-        run_details.append(f"{len(verdict.get('escalated_ids', []))} of {verdict.get('n_claims')} claims escalated to the strong panel." + (f" {len(verdict['fallback_ids'])} escalated claims were unscored by every strong judge; the screen scores stand." if verdict.get("fallback_ids") else ""))
+        run_details.append("Screen panel: " + (", ".join(f"{j['provider']}/{j['model']}" for j in verdict.get("screen_judges") or []) or "none") + "; escalation panel: " + (", ".join(f"{j['provider']}/{j['model']}" for j in verdict.get("judges") or []) or "none") + ".")
+        if verdict.get("n_claims") is not None:
+            run_details.append(f"{len(verdict.get('escalated_ids') or [])} of {verdict['n_claims']} claims escalated to the strong panel." + (f" {len(verdict['fallback_ids'])} escalated claims were unscored by every strong judge; the screen scores stand." if verdict.get("fallback_ids") else ""))
         run_details.append(f"Composite {verdict.get('composite_score')} ({verdict.get('weighting')}; uncapped {verdict.get('composite_uncapped')}), dispersion {verdict.get('dispersion')}, judge agreement {verdict.get('judge_agreement')}; implied composites " + ", ".join(f"{p} {v}" for p, v in (verdict.get("implied_composites") or {}).items()) + ".")
         for p, text in (verdict.get("summaries") or {}).items():
             if p != verdict.get("median_judge"):
@@ -298,7 +326,8 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
     appendix = {"run_details": " ".join(run_details), "grid": (verdict or {}).get("grid"), "dispersion_by_persona": (verdict or {}).get("dispersion_by_persona"), "dispersion_by_provider": (verdict or {}).get("dispersion_by_provider"),
                 "providers": (verdict or {}).get("providers") or sorted({a["provider"] for a in analyses}), "revised_scores": (verdict or {}).get("revised_scores"), "agent_weights": (verdict or {}).get("agent_weights"),
                 "personas": analyses, "metrics_table": metrics_table, "columns": cols, "dcf": {"discount_rate": DISCOUNT_RATE, "terminal_growth": TERMINAL_GROWTH, "years": YEARS},
-                "crosschecks": {"fmp": extras.get("crosscheck"), "edgar": extras.get("edgar_crosscheck")}, "sources": []}
+                "crosschecks": {"fmp": extras.get("crosscheck"), "edgar": extras.get("edgar_crosscheck")}, "sources": [],
+                "judged": [_claim_view(c, fn) for c in ((verdict or {}).get("consensus_claims", []) + (verdict or {}).get("contested_claims", []))]}
     appendix["sources"] = fn.entries(metrics, chunks_by_id, filings)
     return {"ticker": ticker.upper(), "run_kind": run_kind, "snapshot": snapshot, "headline": headline, "business": business, "finances": finances, "red_flags": red,
             "strategy": strategy, "valuation": valuation, "debate": debate, "appendix": appendix, "footnotes": fn}

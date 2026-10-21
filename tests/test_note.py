@@ -66,7 +66,7 @@ def test_fact_sentence_and_tone(aapl_metrics):
     lk = note.lookup(aapl_metrics)
     f = note.fact(lk, "revenue_yoy", "FY2025", "Revenue grew {v} in {p}", tone="growth")
     assert f["text"].startswith("Revenue grew ") and f["text"].endswith(" in FY2025") and "%" in f["text"] and f["ids"] == ["metric:revenue_yoy@FY2025"] and f["tone"] == "good"
-    assert note.fact(lk, "net_debt", "FY2025", "Net debt {v} in {p}", tone="debt")["tone"] in ("good", "bad", "neutral")
+    assert note.fact(lk, "net_debt", "FY2025", "Net debt {v} in {p}", tone="debt")["tone"] is None  # a level carries no colour; build_note colours the change
 
 
 def test_null_metrics_make_no_fact():
@@ -119,7 +119,7 @@ def test_build_note_cheap_run(aapl_metrics):
     assert n["debate"]["bull"][0]["text"] == "Margins expanded." and n["debate"]["bear"][0]["text"] == "Debt is rising." and n["debate"]["contested"] == [] and n["debate"]["summary"] is None
 
 
-def test_note_without_extras(aapl_metrics):
+def test_build_note_without_extras(aapl_metrics):
     n = note.build_note("AAPL", SNAP, aapl_metrics, [], verdict(), analyses(), {}, CHUNKS, FILINGS)
     assert n["headline"]["company"] == "AAPL" and all("None" not in f["text"] for sec in ("business", "finances", "strategy", "valuation") for f in n[sec]["facts"])
     assert not any("iPhone" in f["text"] for f in n["business"]["facts"])
@@ -160,3 +160,48 @@ def test_note_body_length_and_no_ids_outside_appendix(aapl_metrics, tmp_path):
     assert len(body.splitlines()) < 200
     assert "metric:" not in body and "chunk:" not in body and "claude-" not in body and "gpt-" not in body
     assert "judges agreed" in body and "quality 84" in body
+
+
+def test_tone_follows_change_not_level():
+    ms = [Metric("operating_margin", f"FY{y}", v, "ratio", "x") for y, v in zip(range(2021, 2026), (0.30, 0.31, 0.30, 0.29, 0.28))]
+    ms += [Metric("net_debt", "FY2024", 50e9, "USD", "x"), Metric("net_debt", "FY2025", 60e9, "USD", "x"), Metric("revenue", "FY2025", 1e9, "USD", "x")]
+    n = note.build_note("X", {"id": "s", "accessions": []}, ms, [], None, [], {})
+    om = next(f for f in n["finances"]["facts"] if f["text"].startswith("Operating margin"))
+    assert om["tone"] == "bad" and "down 2.0 points" in om["text"]  # a high margin that is falling is not "good"
+    nd = next(f for f in n["finances"]["facts"] if f["text"].startswith("Net debt "))
+    assert nd["tone"] == "bad" and "up from" in nd["text"]
+    assert all(f["tone"] is None for f in n["valuation"]["facts"])  # levels carry no colour
+
+
+def test_valuation_range_cites_min_and_max(aapl_metrics):
+    n = note.build_note("AAPL", SNAP, with_valuation(aapl_metrics), [], verdict(), analyses(), EXTRAS, CHUNKS, FILINGS)
+    pe = next(f for f in n["valuation"]["facts"] if f["text"].startswith("P/E 39.4x"))
+    assert {"metric:pe_5y_min@current", "metric:pe_5y_max@current", "metric:pe_5y_median@current"} <= set(pe["ids"])
+    no_range = [m for m in with_valuation(aapl_metrics) if m.metric_id not in ("pe_5y_min", "pe_5y_max")]
+    pe2 = next(f for f in note.build_note("AAPL", SNAP, no_range, [], verdict(), analyses(), EXTRAS, CHUNKS, FILINGS)["valuation"]["facts"] if f["text"].startswith("P/E 39.4x"))
+    assert "5-year range" not in pe2["text"] and "5-year median of 30.0x" in pe2["text"]
+
+
+def test_sources_show_inputs_and_nested_filing_links():
+    fn = note.Footnotes()
+    base = Metric("fcf", "FY2025", 9.0, "USD", "ocf - capex", {"ocf": {"accession": "0000320193-25-000079", "value": 10.0}, "capex": {"accession": "0000320193-25-000079", "value": 1.0}})
+    fn.ref(["metric:fcf@FY2025"])
+    e = fn.entries([base], {}, FILINGS)[0]
+    assert e["url"] == "https://www.sec.gov/x/aapl-10k.htm" and "ocf" in e["inputs"] and "capex" in e["inputs"]  # provenance one level down still links the filing
+
+
+def test_report_keeps_flags_judged_claims_and_escapes(aapl_metrics, tmp_path):
+    from fundabot.report.render import render_verdict
+
+    v = verdict()
+    v["consensus_claims"][0]["text"] = "Revenue <b>re-accelerated</b> to 16%."
+    v["screen_judges"], v["n_claims"] = [], None  # an older stored verdict
+    md_path, html_path = render_verdict("AAPL", SNAP, v, analyses(), [], with_valuation(aapl_metrics), [], CHUNKS, FILINGS, tmp_path, "full", extras=EXTRAS)
+    md, html = md_path.read_text(), html_path.read_text()
+    body = md.split("# Appendix")[0]
+    assert "*(vendor data)*" in body.split("## Finances")[0]  # the segment lines keep their flag in the report
+    assert "All judged claims" in md and "strength 4.0" in md.split("All judged claims")[1] and "escalated panel" in md.split("All judged claims")[1] or "escalated" in md.split("All judged claims")[1]
+    assert "<b>re-accelerated</b>" not in html and "&lt;b&gt;re-accelerated&lt;/b&gt;" in html  # model text is escaped in the report too
+    assert "0 of None" not in md and "Screen panel: none" in md
+    assert body.count("Valuation sits at the top") == 1 or len(v["consensus_claims"]) < 4  # bears are not printed twice in full
+    assert "Revenue up 16." in body or "Revenue up" in body

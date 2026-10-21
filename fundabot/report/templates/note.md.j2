@@ -8,7 +8,7 @@
 
 {% if n.business.description %}{{ n.business.description }}{{ "…" if n.business.description|length >= 300 }}
 
-{% endif %}{% for f in n.business.facts %}- {{ f.text }} {{ f.ref }}
+{% endif %}{% for f in n.business.facts %}- {{ f.text }}{% if f.flags_text %} *({{ f.flags_text }})*{% endif %} {{ f.ref }}
 {% else %}- No company profile stored yet (run Refresh data).
 {% endfor %}
 ## Finances
@@ -32,12 +32,12 @@
 {% endfor %}
 **What the bears say**
 
-{% for c in n.red_flags.bears %}- {{ c.text }} {{ c.ref }}{% if c.refutations %} — answered by {{ c.refutations[0].by.split("/")[0] }}: {{ c.refutations[0].reason }} {{ c.refutations[0].ref }}{% endif %}
+{% for c in n.red_flags.bears %}- {{ c.text|e }} {{ c.ref }}{% if c.refutations %} — answered by {{ c.refutations[0].by.split("/")[0] }}: {{ c.refutations[0].reason|e }} {{ c.refutations[0].ref }}{% endif %}
 {% else %}- No surviving negative claim.
 {% endfor %}
 ## Strategy
 
-{% if n.strategy.narrative %}Recent price action: {{ n.strategy.narrative }}
+{% if n.strategy.narrative %}Recent price action: {{ n.strategy.narrative|e }}
 
 {% endif %}{% for f in n.strategy.facts %}- {{ f.text }}{% if f.flags_text %} *({{ f.flags_text }})*{% endif %} {{ f.ref }}
 {% else %}- No guidance, estimate or catalyst data stored.
@@ -51,19 +51,19 @@
 
 **Bull case**
 
-{% for c in n.debate.bull %}- {{ c.text }} {{ c.ref }}
+{% for c in n.debate.bull %}- {{ c.text|e }} {{ c.ref }}
 {% else %}- No surviving positive claim.
 {% endfor %}
 **Bear case**
 
-{% for c in n.debate.bear %}- {{ c.text }} {{ c.ref }}
+{% for c in n.debate.bear %}- {{ c.text|e }} {{ c.ref }}
 {% else %}- No surviving negative claim.
 {% endfor %}
 {% if n.debate.contested %}**Where they disagree**
 
-{% for c in n.debate.contested %}- {{ c.text }} {{ c.ref }} ({{ c.agent.split("/")[0] }}){% for r in c.refutations %} — {{ r.by.split("/")[0] }} answers: {{ r.reason }} {{ r.ref }}{% endfor %}{% if c.notes %} — judge: {{ c.notes[0] }}{% endif %}
+{% for c in n.debate.contested %}- {{ c.text|e }} {{ c.ref }} ({{ c.agent.split("/")[0] }}){% for r in c.refutations %} — {{ r.by.split("/")[0] }} answers: {{ r.reason|e }} {{ r.ref }}{% endfor %}{% if c.notes %} — judge: {{ c.notes[0]|e }}{% endif %}
 {% endfor %}
-{% endif %}{% if n.debate.summary %}**Judge's summary** ({{ n.debate.median_judge }}): {{ n.debate.summary }}
+{% endif %}{% if n.debate.summary %}**Judge's summary** ({{ n.debate.median_judge }}): {{ n.debate.summary|e }}
 
 {% endif %}{% if n.debate.subscores_text %}Scores: {{ n.debate.subscores_text }}.
 {% endif %}
@@ -73,7 +73,7 @@
 
 <details markdown="1"><summary>Run details</summary>
 
-{{ n.appendix.run_details }}
+{{ n.appendix.run_details|e }}
 
 </details>
 
@@ -95,29 +95,37 @@ Revised scores after rebuttal: {% for a, s in (n.appendix.revised_scores or {})|
 {% for a in n.appendix.personas %}
 ### {{ a.persona|capitalize }} ({{ a.provider }}/{{ a.model }})
 
-{{ a.grounded.thesis }}
+{{ a.grounded.thesis|e }}
 {% if a.grounded.thesis_unsupported_numbers %}
 > ⚠ unsupported numbers in thesis: {{ a.grounded.thesis_unsupported_numbers|join(", ") }}
 {% endif %}
 **Claims**
 {% for c in a.grounded.claims %}
-- ({{ c.direction }}, weight {{ c.weight }}) {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}{% if c.unsupported_numbers %} ⚠ unsupported: {{ c.unsupported_numbers|join(", ") }}{% endif %}
+- ({{ c.direction }}, weight {{ c.weight }}) {{ c.text|e }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}{% if c.unsupported_numbers %} ⚠ unsupported: {{ c.unsupported_numbers|join(", ") }}{% endif %}
 {% endfor %}
 {% if a.grounded.dropped_claims %}
 Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
 {% for c in a.grounded.dropped_claims %}
-- ~~{{ c.text }}~~ — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+- ~~{{ c.text|e }}~~ — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
 {% endfor %}
 {% endif %}
-**Key risks:** {{ a.grounded.key_risks|join("; ") }}
+**Key risks:** {{ a.grounded.key_risks|join("; ")|e }}
 
-**What would change my mind:** {{ a.grounded.what_would_change_my_mind|join("; ") }}
+**What would change my mind:** {{ a.grounded.what_would_change_my_mind|join("; ")|e }}
 {% if a.grounded.risks_unsupported_numbers %}
 > ⚠ unsupported numbers in risks: {{ a.grounded.risks_unsupported_numbers|join(", ") }}
 {% endif %}
-{% if a.rebuttal %}**Rebuttal:** revised score {{ a.rebuttal.revised_score }} (confidence {{ a.rebuttal.revised_confidence }}){% for r in a.rebuttal.responses %}; {{ r.verdict }} `{{ r.claim_id }}`: {{ r.reason }}{% endfor %}{% if a.rebuttal.withdraws %}; withdraws {% for w in a.rebuttal.withdraws %}`{{ w }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}
+{% if a.rebuttal %}**Rebuttal:** revised score {{ a.rebuttal.revised_score }} (confidence {{ a.rebuttal.revised_confidence }}){% for r in a.rebuttal.responses %}; {{ r.verdict }} `{{ r.claim_id }}`: {{ r.reason|e }}{% endfor %}{% if a.rebuttal.withdraws %}; withdraws {% for w in a.rebuttal.withdraws %}`{{ w }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}
 
 {% endif %}Grounding: {{ a.grounded.stats.claims_total }} claims, {{ a.grounded.stats.claims_dropped }} dropped, hallucination rate {{ "%.0f"|format(a.grounded.stats.hallucination_rate * 100) }}% ({{ a.grounded.stats.numbers_unsupported }}/{{ a.grounded.stats.numbers_total }} numbers). Retrieved chunks: {% for cid in a.chunk_ids %}`chunk:{{ cid }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}
+
+</details>
+
+<details markdown="1"><summary>All judged claims ({{ n.appendix.judged|length }})</summary>
+
+{% for c in n.appendix.judged %}- ({{ c.direction }}, {{ c.agent }}, strength {{ "%.1f"|format(c.strength) if c.strength is not none else "n/a" }}, materiality {{ "%.1f"|format(c.materiality) if c.materiality is not none else "n/a" }}{% if c.path %}, {{ c.path }} panel{% endif %}) {{ c.text|e }} {{ c.ref }}{% if c.conceded_by %} — conceded by {{ c.conceded_by|join(", ") }}{% endif %}{% for r in c.refutations %} — {{ r.by }} refutes: {{ r.reason|e }} {{ r.ref }}{% endfor %}{% for note in c.notes %} — judge: {{ note|e }}{% endfor %}
+{% else %}- No judged claims (cheap run).
 {% endfor %}
 
 </details>
@@ -132,7 +140,7 @@ Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
 {% for mid, cells in rows %}| `{{ mid }}` | {{ cells|join(" | ") }} |
 {% endfor %}
 {% endfor %}
-Flags: `*` = restated, derived, out_of_bounds, source_conflict (FMP and the filing disagree; the filed value is shown) or partial data (see the sources for each metric's inputs).
+Flags: `*` = restated, derived, out_of_bounds, source_conflict (FMP and the filing disagree; the filed value is shown) or partial data; each source entry lists the metric's inputs.
 
 </details>
 
@@ -146,7 +154,7 @@ FMP vs EDGAR statement lines: {{ n.appendix.crosschecks.edgar.ok }} of {{ n.appe
 
 <details markdown="1" open><summary>Sources ({{ n.appendix.sources|length }})</summary>
 
-{% for s in n.appendix.sources %}<p id="src-{{ s.n }}"><b>[{{ s.n }}]</b> <code>{{ s.id }}</code> — {{ s.text }}{% if s.url %} <a href="{{ s.url }}">filing</a>{% endif %}</p>
+{% for s in n.appendix.sources %}<p id="src-{{ s.n }}"><b>[{{ s.n }}]</b> <code>{{ s.id }}</code> — {{ s.text|e }}{% if s.inputs %} <span class="muted">inputs {{ s.inputs|e }}</span>{% endif %}{% if s.url %} <a href="{{ s.url }}">filing</a>{% endif %}</p>
 {% endfor %}
 
 </details>

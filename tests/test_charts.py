@@ -60,3 +60,11 @@ def test_price_chart_markers_and_highlights():
     assert svg.count('class="highlight"') == 1 and "Apple falls" in svg and svg.count("<title>") >= 3
     assert "legend" in svg and "ma50" in svg and "ma200" in svg
     assert 'fill="var(--series' not in svg.split("<text")[1]  # text never wears the series color
+
+
+def test_footnote_links_only_in_the_body():
+    from fundabot.report.render import _footnote_links
+
+    md = "fact [1]\n\nquoted claim says [2] inside\n\n# Appendix\n\n<p id=\"src-1\"><b>[1]</b> source</p>"
+    out = _footnote_links(md)
+    assert 'href="#src-1">[1]</a>' in out.split("# Appendix")[0] and '<b>[1]</b>' in out.split("# Appendix")[1]
