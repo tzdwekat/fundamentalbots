@@ -144,15 +144,30 @@ house trades, ESG, crowdfunding, commodities, forex, crypto, intraday bars.
 
 ## What the report contains
 
-Charts (inline SVG, no dependencies, light and dark mode): revenue and free cash flow, margins and ROIC, quarterly
-revenue growth, and each valuation ratio marked on its own 5-year range. The full-run verdict adds the persona × provider
-score grid as a diverging heatmap. Every value also appears in the metrics table, which is the accessible table view.
+Since 2026-10-21 every report is an analyst note, assembled in code from stored data (no model writes a sentence; the
+only model text is quoted and attributed). `fundabot render T` rebuilds it from a stored run with no model calls.
 
-Red flags from the rules engine; a score strip (per persona, plus an unweighted mean clearly labelled as such: the
-evidence-weighted composite, rebuttal round and judge are Phase 3); each persona's thesis and claims with evidence ids,
-claims dropped for unresolved evidence, numbers flagged when they match neither a metric nor a retrieved filing
-passage; the metrics table; DCF assumptions; and a sources appendix for every cited metric and chunk.
+1. **Headline**: company, price and market cap, the composite score with a one-line reading, and three anchor numbers.
+2. **Business**: what the company does, the largest product and geographic segments with share and growth, employees,
+   the next earnings date.
+3. **Finances**: growth (last year, last quarter, 3y and 5y CAGR), margins and returns over five years, financial
+   position, cash quality, capital allocation; the trend charts and the valuation range bars.
+4. **Red flags**: the rules-engine flags in words, then what the bears say (the strongest surviving negative claims
+   with their answers).
+5. **Strategy**: guidance and management tone with quotes, estimate revisions, capital intensity, insider and
+   institutional signals, catalysts, and what moved the price recently.
+6. **Valuation**: each multiple against its own five-year range and the peer median, forward P/E, the DCF range
+   against the price, the growth the price implies, analyst targets and ratings.
+7. **The debate**: bull case, bear case, where the analysts disagree (with both sides and the judge's note), the
+   judge's summary, and the sub-scores.
+8. **Appendix** (collapsed): run details (providers, judge panels, escalation, other judges' summaries, grounding
+   statistics), the score grid and heatmap, every persona's full output and rebuttal, the full metrics table, DCF
+   assumptions and cross-checks, and the numbered sources.
 
+Every fact carries footnote links `[n]` to its source (the metric line or the filing excerpt, with a link to the
+filing); the raw `metric:` and `chunk:` ids appear only in the appendix. A derived, restated or conflicting value says
+so in words. The ticker page follows the same order and builds the note from the run's own snapshot, with a banner
+when newer data has been ingested since.
 ## Accuracy notes
 
 Sources (2026-10-19): the fundamentals come from two sources merged per value in code. EDGAR XBRL company facts are the

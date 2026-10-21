@@ -332,3 +332,35 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir, run_kind, extras=load_extras(conn, s["cik"], ticker))
     log.info("%s: verdict %s composite %s", ticker, html, verdict["composite_score"])
     return html
+
+
+def render_stored(conn: psycopg.Connection, ticker: str, sid: str, out_dir: Path = Path("reports")) -> Path | None:
+    """Re-render the analyst note for a stored snapshot (its verdict when it has one, else its cheap analyses): no model calls."""
+    from fundabot.agents.runner import load_analyses
+    from fundabot.debate.rebuttal import load_rebuttals
+    from fundabot.report.note import load_extras
+    from fundabot.report.render import render_report, render_verdict
+    from fundabot.retrieval.query import load_chunks
+
+    try:
+        s = snapshot.load(conn, sid) if sid else None
+    except KeyError:
+        s = None
+    if not s:
+        return None
+    analyses = load_analyses(conn, sid)
+    if not analyses:
+        return None
+    metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
+    chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
+    with conn.cursor() as cur:
+        cur.execute("SELECT accession, form, filed, primary_doc_url FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (s["accessions"],))
+        filings = [dict(zip(["accession", "form", "filed", "primary_doc_url"], r)) for r in cur.fetchall()]
+        cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,))
+        row = cur.fetchone()
+    extras = load_extras(conn, s["cik"], ticker)
+    if row:
+        _, html = render_verdict(ticker, s, row[0], analyses, load_rebuttals(conn, sid), metrics, flags, chunks_by_id, filings, out_dir, "full", extras=extras)
+    else:
+        _, html = render_report(ticker, s, metrics, flags, analyses, chunks_by_id, filings, out_dir, extras=extras)
+    return html

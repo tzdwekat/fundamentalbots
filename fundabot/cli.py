@@ -230,6 +230,30 @@ def web(host: str = "127.0.0.1", port: int = 8787, reload: bool = False):
     uvicorn.run("fundabot.web.app:app", host=host, port=port, reload=reload, log_level="info")
 
 
+@app.command()
+def render(ticker: str, snapshot: str = "", open_report: bool = typer.Option(False, "--open"), out_dir: str = "reports"):
+    """Re-render the analyst note from a stored run (the latest full verdict by default); no model calls."""
+    import webbrowser
+    from pathlib import Path
+
+    from fundabot.db.session import connect
+    from fundabot.orchestrate.pipeline import render_stored
+
+    conn = connect()
+    sid = snapshot or latest_with_verdict(conn, ticker)
+    if sid is None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT s.id FROM snapshots s WHERE s.ticker = %s AND EXISTS (SELECT 1 FROM analyses a WHERE a.snapshot_id = s.id) ORDER BY s.created_at DESC LIMIT 1", (ticker.upper(),))
+            row = cur.fetchone()
+        sid = row[0] if row else None
+    html = render_stored(conn, ticker, sid, Path(out_dir)) if sid else None
+    if html is None:
+        raise typer.BadParameter(f"no stored analysis for {ticker.upper()}")
+    typer.echo(f"{ticker.upper()}: {html}")
+    if open_report:
+        webbrowser.open(html.resolve().as_uri())
+
+
 @app.command("judge-ab")
 def judge_ab(ticker: str, snapshot: str = "", judges: int = 3, out_dir: str = "reports", profile: str = ""):
     """Re-judge a stored snapshot with the screen/escalation panels (grid and rebuttals cached) and compare with its stored verdict."""

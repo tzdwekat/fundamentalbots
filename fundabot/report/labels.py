@@ -65,7 +65,7 @@ def fmt(value, k: str) -> str:
     if k == "count":
         return f"{v:.0f}"
     if k == "shares":
-        return f"{v / 1e6:,.0f}M shares"
+        return f"{v / 1e6:,.0f}M shares" if abs(v) >= 1e6 else f"{v:,.0f} shares"
     if k == "usd_share":
         return f"${v:,.2f}"
     if k == "score":

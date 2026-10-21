@@ -361,3 +361,18 @@ async def test_overview_anchor_numbers(client, db_conn, fixture_prepare, fmp_fix
     seed_prices(db_conn)
     r = client.get("/")
     assert r.status_code == 200 and "<th>P/E</th>" in r.text and "<th>FCF yield</th>" in r.text and "<th>rev. growth</th>" in r.text
+
+
+@pytest.mark.db
+async def test_render_stored_snapshot_makes_no_model_calls(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    from fundabot.orchestrate.pipeline import render_stored
+
+    await full_run(db_conn, tmp_path)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); sid = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM model_calls"); before = cur.fetchone()[0]
+    html = render_stored(db_conn, "AAPL", sid, out_dir=tmp_path)
+    assert html.name == f"{sid}-full.html" and "judges agreed" in html.with_suffix(".md").read_text()
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM model_calls"); assert cur.fetchone()[0] == before
+    assert render_stored(db_conn, "AAPL", "nope", out_dir=tmp_path) is None

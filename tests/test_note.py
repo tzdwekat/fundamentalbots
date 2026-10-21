@@ -58,7 +58,7 @@ def test_labels_cover_groups():
 
 def test_fmt_kinds():
     assert labels.fmt(416.161e9, "usd") == "$416.2B" and labels.fmt(5.5e6, "usd") == "$5.5M" and labels.fmt(0.064, "pct") == "6.4%" and labels.fmt(39.38, "x") == "39.4x"
-    assert labels.fmt(14776e6, "shares") == "14,776M shares" and labels.fmt(7.46, "usd_share") == "$7.46" and labels.fmt(None, "pct") == "n/a"
+    assert labels.fmt(14776e6, "shares") == "14,776M shares" and labels.fmt(0, "shares") == "0 shares" and labels.fmt(7.46, "usd_share") == "$7.46" and labels.fmt(None, "pct") == "n/a"
     assert labels.flag_words(["derived", "source_conflict"]) == "derived; FMP and the filing disagree"
 
 

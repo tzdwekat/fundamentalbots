@@ -167,7 +167,9 @@ def build_note(ticker: str, snapshot: dict, metrics: list[Metric], flags, verdic
     business = {"title": "Business", "facts": [], "description": (profile.get("description") or "")[:300].strip()}
     if profile.get("employees"):
         business["facts"].append({"text": f"{profile.get('name') or ticker.upper()} employs {profile['employees']:,} people.", "value": None, "ids": [], "tone": None, "flags_text": "", "ref": ""})
-    for s in sorted((s for s in extras.get("segments") or [] if s.get("share") is not None), key=lambda s: (s["kind"], -(s["share"] or 0)))[:6]:
+    segs = [s for s in extras.get("segments") or [] if s.get("share") is not None]
+    top = [s for kind in ("product", "geographic") for s in sorted((x for x in segs if x["kind"] == kind), key=lambda x: -(x["share"] or 0))[:3]]
+    for s in top:
         growth = f", {'growing' if (s.get('yoy') or 0) >= 0 else 'shrinking'} {abs(s['yoy']) * 100:.1f}%" if s.get("yoy") is not None else ""
         business["facts"].append({"text": f"{s['name']} is {s['share'] * 100:.0f}% of revenue ({s['kind']}, {s['fy']}){growth}.", "value": None, "ids": [], "tone": None, "flags_text": "vendor data", "ref": ""})
     if extras.get("next_earnings"):
