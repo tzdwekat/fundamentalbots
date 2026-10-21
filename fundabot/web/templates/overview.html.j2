@@ -10,12 +10,12 @@
   <span class="muted">default profile <code>{{ default_profile() }}</code> (FUNDABOT_PROFILE in .env)</span>
 </form>
 <table class="list">
-<thead><tr><th>ticker</th><th>close</th><th>live / day</th><th>1m</th><th>3m</th><th>6m</th><th>outlook</th><th>composite</th><th>verdict</th><th>queue</th><th>analyze</th></tr></thead>
+<thead><tr><th>ticker</th><th>close</th><th>live / day</th><th>1m</th><th>3m</th><th>6m</th><th>rev. growth</th><th>P/E</th><th>FCF yield</th><th>outlook</th><th>composite</th><th>verdict</th><th>queue</th><th>analyze</th></tr></thead>
 <tbody>
 {% for r in rows %}
 <tr>
   <td><a href="/t/{{ r.ticker }}">{{ r.ticker }}</a></td>
-  <td>{{ r.close|num }}</td><td>{% if r.quote %}{{ r.quote.price|num }} <span class="{{ 'pos' if (r.quote.change_pct or 0) >= 0 else 'neg' }}">{{ ((r.quote.change_pct or 0) / 100)|pct(2) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td><td>{{ r.ret_1m|pct }}</td><td>{{ r.ret_3m|pct }}</td><td>{{ r.ret_6m|pct }}</td>
+  <td>{{ r.close|num }}</td><td>{% if r.quote %}{{ r.quote.price|num }} <span class="{{ 'pos' if (r.quote.change_pct or 0) >= 0 else 'neg' }}">{{ ((r.quote.change_pct or 0) / 100)|pct(2) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td><td>{{ r.ret_1m|pct }}</td><td>{{ r.ret_3m|pct }}</td><td>{{ r.ret_6m|pct }}</td><td>{{ r.rev_growth|pct if r.rev_growth is not none else "—" }}</td><td>{{ r.pe|num(1) if r.pe else "—" }}</td><td>{{ r.fcf_yield|pct if r.fcf_yield is not none else "—" }}</td>
   <td><span class="label">{{ r.outlook }}</span></td>
   <td>{{ r.composite if r.composite is not none else "—" }}</td>
   <td>{{ r.verdict_date or "—" }}</td>
@@ -32,7 +32,7 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="11">No tickers yet. Add one above.</td></tr>
+<tr><td colspan="14">No tickers yet. Add one above.</td></tr>
 {% endfor %}
 </tbody>
 </table>

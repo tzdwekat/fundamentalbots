@@ -24,3 +24,5 @@ ol.narrative li{margin-bottom:6px}ul.plain{list-style:none;padding:0}ul.plain li
 blockquote{margin:8px 0;padding-left:10px;border-left:3px solid var(--line);color:var(--muted)}details summary{cursor:pointer;color:var(--muted);font-size:13px}.rule{font-size:13px;margin-top:-4px}
 
 .pos{color:var(--pos)}.neg{color:var(--neg)}tr.own td{font-weight:600}
+
+.h1sub{font-size:15px;font-weight:400}ul.facts{padding-left:18px}ul.facts li{margin:3px 0}ul.facts li.good{border-left:3px solid var(--pos);padding-left:6px;list-style:none;margin-left:-18px}ul.facts li.bad{border-left:3px solid var(--neg);padding-left:6px;list-style:none;margin-left:-18px}.reading{margin:6px 0}a.fn{font-size:11px;vertical-align:super;margin-left:2px}table.list td{text-align:right}table.list td:first-child,table.list th:first-child{text-align:left}

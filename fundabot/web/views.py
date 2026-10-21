@@ -183,8 +183,10 @@ def panel_for(conn, ticker: str) -> dict | None:
 
 
 def ownership(metrics: list[Metric]) -> list[str]:
+    from fundabot.report import labels
+
     ids = ("inst_holders_change_pct", "inst_shares_change_pct", "insider_net_shares_90d", "insider_buy_sell_ratio", "price_target_upside", "eps_estimate_revision_90d")
-    return [metric_line(m) for m in metrics if m.metric_id in ids and m.period == "current" and m.value is not None]
+    return [f"{labels.label(m.metric_id)}: {labels.fmt(m.value, labels.kind(m.metric_id))}" for m in metrics if m.metric_id in ids and m.period == "current" and m.value is not None]
 
 
 def narrative_inputs(conn, ticker: str, cik: int, window_days: int, with_chunks: bool, px: pd.DataFrame | None = None, snap: dict | None = None,
@@ -221,7 +223,7 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page = {"ticker": ticker, "cik": cik, "window_days": window_days, "news_days": news_days, "windows": WINDOWS, "news_windows": NEWS_WINDOWS,
             "narrative_estimate": NARRATIVE_ESTIMATE, "stats": None, "chart_svg": None, "moves": [], "outlook": {"label": "insufficient data", "components": {}, "rule": "no data"},
             "narrative": None, "narrative_stale": False, "news": [], "panel": None, "snapshot": None, "ownership": [], "next_earnings": None, "reports": [],
-            "on_watchlist": any(e["ticker"] == ticker for e in watchlist.entries(conn)), "profile": None, "peers": [], "peer_rows": [], "peer_medians": {}, "segments": [],
+            "on_watchlist": any(e["ticker"] == ticker for e in watchlist.entries(conn)), "note": None, "newer_data": False, "profile": None, "peers": [], "peer_rows": [], "peer_medians": {}, "segments": [],
             "dividends": {}, "dividend_rows": [], "insider_trades": [], "holders": [], "scores": {}, "ratings": None, "crosscheck": None, "edgar_crosscheck": None, "risk_free": None}
     if cik is None:
         return page
@@ -246,6 +248,9 @@ def ticker_page(conn, ticker: str, window_days: int = 90, news_days: int = 30, r
     page["metrics_snapshot_id"] = snap["id"] if snap else None
     cur = {m.metric_id: m.value for m in metrics if m.period == "current"}
     page.update(fmp_sections(conn, cik, ticker, metrics, cur.get("pe"), cur.get("ev_sales"), refresh=refresh))
+    page["note"] = note_for_page(conn, ticker, page["outlook"]["label"])
+    page["newer_data"] = bool(page["note"] and snap and snap["id"] != page["note"]["sid"])
+    page["newer_data_date"] = snap.get("created_at").date() if page["newer_data"] and snap.get("created_at") else None
     return page
 
 
@@ -272,7 +277,10 @@ def overview(conn) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("SELECT status FROM run_queue WHERE ticker = %s AND status IN ('queued', 'started') ORDER BY id DESC LIMIT 1", (t,))
             q = cur.fetchone()
+        curm = {m.metric_id: m.value for m in metrics if m.period == "current"}
+        last_q = max((m.period for m in metrics if m.metric_id == "revenue_yoy" and m.period.startswith("Q") and m.value is not None), key=lambda p: (int(p[4:]), int(p[1])), default=None)
         rows.append({"ticker": t, "close": stats.get("close"), "ret_1m": stats.get("ret_1m"), "ret_3m": stats.get("ret_3m"), "ret_6m": stats.get("ret_6m"),
+                     "rev_growth": next((m.value for m in metrics if m.metric_id == "revenue_yoy" and m.period == last_q), None) if last_q else None, "pe": curm.get("pe"), "fcf_yield": curm.get("fcf_yield"),
                      "outlook": technicals.outlook(stats, metrics)["label"], "composite": composite, "verdict_date": verdict_date, "queue_status": q[0] if q else None,
                      "quote": quotes.get(t)})
     return rows
@@ -391,3 +399,46 @@ def fmp_sections(conn, cik: int, ticker: str, metrics: list[Metric], own_pe: flo
             "dividend_rows": fmp_extra.load_dividends(conn, cik)[:4], "insider_trades": fmp_extra.load_insider_trades(conn, cik, limit=12), "holders": fmp_extra.load_holders(conn, cik),
             "scores": {"altman_z": cur.get("altman_z"), "piotroski": cur.get("piotroski")}, "ratings": facts.get("ratings"), "crosscheck": facts.get("fmp_crosscheck"), "edgar_crosscheck": facts.get("edgar_crosscheck"),
             "risk_free": facts.get("treasury_10y")}
+
+
+def note_for_page(conn, ticker: str, outlook_label: str | None = None) -> dict | None:
+    """The analyst note built from the verdict's snapshot (or the newest analysed snapshot), so numbers and debate agree."""
+    from fundabot.agents.runner import load_analyses
+    from fundabot.cli import latest_with_verdict
+    from fundabot.debate.rebuttal import load_rebuttals
+    from fundabot.report.note import build_note, load_extras
+
+    sid = latest_with_verdict(conn, ticker)
+    verdict = None
+    if sid:
+        with conn.cursor() as cur:
+            cur.execute("SELECT verdict FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,))
+            verdict = cur.fetchone()[0]
+    else:
+        with conn.cursor() as cur:
+            cur.execute("SELECT s.id FROM snapshots s WHERE s.ticker = %s AND EXISTS (SELECT 1 FROM analyses a WHERE a.snapshot_id = s.id AND a.status = 'ok') ORDER BY s.created_at DESC LIMIT 1", (ticker.upper(),))
+            row = cur.fetchone()
+        sid = row[0] if row else None
+    if sid is None:
+        return None
+    s = snapshot.load(conn, sid)
+    analyses = load_analyses(conn, sid)
+    by_agent = {r["agent"]: r["output"] for r in load_rebuttals(conn, sid)}
+    for a in analyses:
+        a["rebuttal"] = by_agent.get(a["agent"])
+    metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
+    chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
+    with conn.cursor() as cur:
+        cur.execute("SELECT accession, form, filed, primary_doc_url FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (s["accessions"],))
+        filings = [dict(zip(["accession", "form", "filed", "primary_doc_url"], r)) for r in cur.fetchall()]
+        cur.execute("SELECT created_at FROM verdicts WHERE snapshot_id = %s AND run_kind = 'full'", (sid,))
+        vrow = cur.fetchone()
+    extras = load_extras(conn, s["cik"], ticker)
+    extras["outlook_label"] = outlook_label
+    n = build_note(ticker, s, metrics, flags, verdict, analyses, extras, chunks_by_id, filings, run_kind="full" if verdict else "cheap")
+    n["sid"] = sid
+    n["fn_index"] = {eid: i + 1 for i, eid in enumerate(n["footnotes"].order)}
+    n["note_date"] = (vrow[0].date() if vrow else s.get("created_at").date() if s.get("created_at") else None)
+    n["report_url"] = f"/reports/{ticker.upper()}/{sid}{'-full' if verdict else ''}.html"
+    n["persona_scores"] = {a["agent"]: a["grounded"]["score"] for a in analyses if a.get("grounded")}
+    return n

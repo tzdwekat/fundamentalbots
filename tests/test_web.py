@@ -80,7 +80,7 @@ async def test_ticker_page_sections(client, db_conn, fixture_prepare, fmp_fixtur
     assert r.status_code == 200
     for needle in ("<svg", "Outlook", "Bull case", "Bear case", "Apple beats on iPhone", "JP Morgan", "Explain moves", "~$0.0", "Next earnings", "2026-11-02", "-full.html", "Red flags", "ret_3m".replace("ret_3m", "3m")):
         assert needle in r.text, needle
-    assert "metric:" in r.text and "evidence/" in r.text  # claim evidence links to the drawer
+    assert "class=\"fn ev\"" in r.text and "evidence/" in r.text  # claim evidence opens the drawer through footnotes
     chart = client.get("/t/AAPL/chart?window=90").text
     assert "price:2026-" in chart and "<th>volume</th>" in chart  # the largest moves carry their ids and relative volume
 
@@ -262,7 +262,7 @@ async def test_page_sections_fmp(client, db_conn, fixture_prepare, fmp_fixture, 
     db_conn.commit()
     r = client.get("/t/AAPL?window=90")
     assert r.status_code == 200
-    for needle in ("Apple Inc. · Technology · Consumer Electronics · 166,000 employees", "Peers", "SONY", "18.5", "Revenue segments", "iPhone", "86", "+4.2%", "Ownership",
+    for needle in ("Apple Inc. · Technology · Consumer Electronics", "166,000", "Peers", "SONY", "18.5", "Revenue segments", "iPhone", "86", "+4.2%", "Ownership",
                    "BLACKROCK, INC.", "Borders Ben", "Scores and ratings", "Altman Z", "13.5", "Piotroski", "buy 19", "Cross-check", "9 of 10 within 10%", "ev_ebitda", "10-year Treasury 5.09%", "Dividend", "1.06"):
         assert needle in r.text, needle
 
@@ -316,3 +316,48 @@ def test_page_shows_edgar_crosscheck(client, db_conn):
         cur.execute("UPDATE ticker_facts SET value = %s WHERE key = 'edgar_crosscheck'", (J({"checked": "2026-10-19", "ok": 0, "total": 0, "rows": []}),))
     db_conn.commit()
     assert "0 of 0" not in client.get("/t/AAPL").text
+
+
+@pytest.mark.db
+async def test_page_note_uses_verdict_snapshot_with_banner(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    from fundabot.orchestrate import snapshot
+
+    await full_run(db_conn, tmp_path)
+    seed_prices(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id FROM snapshots ORDER BY created_at DESC LIMIT 1"); old = cur.fetchone()[0]
+    r = client.get("/t/AAPL")
+    assert r.status_code == 200 and f'hx-get="/evidence/{old}/' in r.text and "newer data" not in r.text.lower()
+    new = snapshot.create_snapshot(db_conn, "AAPL", 320193, 7, ["0000320193-25-000079"], date(2026, 10, 18), 350.0, 1e10)
+    with db_conn.cursor() as cur:  # a newer data snapshot with metrics but no analysis
+        cur.execute("INSERT INTO metrics (snapshot_id, metric_id, period, value, unit, formula_id, inputs, flags) SELECT %s, metric_id, period, value, unit, formula_id, inputs, flags FROM metrics WHERE snapshot_id = %s", (new, old))
+    db_conn.commit()
+    r = client.get("/t/AAPL")
+    assert f'hx-get="/evidence/{old}/' in r.text and "newer data" in r.text.lower() and "Analyze" in r.text
+
+
+@pytest.mark.db
+async def test_page_sections_in_framework_order(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    seed_prices(db_conn)
+    text = client.get("/t/AAPL").text
+    positions = [text.index(h) for h in ("<h2>Business", "<h2>Finances", "<h2>Red flags", "<h2>Strategy", "<h2>Valuation", "<h2>The debate")]
+    assert positions == sorted(positions)
+    assert "judges agreed" in text and "Bull case" in text and "Bear case" in text and "metric:" not in text.split("<h2>The debate")[0].split("<h2>Business")[1]
+
+
+@pytest.mark.db
+async def test_page_footnote_opens_drawer(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    seed_prices(db_conn)
+    text = client.get("/t/AAPL").text
+    assert 'class="fn ev"' in text and ">[1]</a>" in text and "hx-target=\"#drawer\"" in text
+
+
+@pytest.mark.db
+async def test_overview_anchor_numbers(client, db_conn, fixture_prepare, fmp_fixture, tmp_path):
+    await full_run(db_conn, tmp_path)
+    seed_watch(db_conn)
+    seed_prices(db_conn)
+    r = client.get("/")
+    assert r.status_code == 200 and "<th>P/E</th>" in r.text and "<th>FCF yield</th>" in r.text and "<th>rev. growth</th>" in r.text

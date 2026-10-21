@@ -1,0 +1,8 @@
+{%- macro fn(ids, sid, index) -%}{% for i in ids if i in index %}<a class="fn ev" hx-get="/evidence/{{ sid }}/{{ i|urlencode }}" hx-target="#drawer">[{{ index[i] }}]</a>{% endfor %}{%- endmacro -%}
+{%- macro facts(items, sid, index) -%}
+<ul class="facts">{% for f in items %}<li class="{{ f.tone or '' }}">{{ f.text }}{% if f.flags_text %} <span class="muted">({{ f.flags_text }})</span>{% endif %} {{ fn(f.ids, sid, index) }}</li>{% endfor %}</ul>
+{%- endmacro -%}
+{%- macro claims(items, sid, index) -%}
+{% for c in items %}<div class="claim {{ c.direction }}"><p>{{ c.text }} {{ fn(c.ids, sid, index) }} <span class="muted">· {{ c.agent.split("/")[0] }}{% if c.strength is not none %} · strength {{ "%.1f"|format(c.strength) }} · materiality {{ "%.1f"|format(c.materiality) }}{% endif %}</span></p>
+{% for r in c.refutations %}<p class="refute">{{ r.by.split("/")[0] }} answers: {{ r.reason }}</p>{% endfor %}{% if c.notes %}<p class="muted">judge: {{ c.notes[0] }}</p>{% endif %}</div>{% else %}<p class="muted">none</p>{% endfor %}
+{%- endmacro -%}

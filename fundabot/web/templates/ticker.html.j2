@@ -1,9 +1,10 @@
 {% extends "base.html.j2" %}
+{% from "_fn.html.j2" import fn, facts, claims %}
 {% block title %}{{ ticker }} · fundabot{% endblock %}
 {% block body %}
+{% set N = note %}{% set sid = N.sid if N else metrics_snapshot_id %}{% set idx = N.fn_index if N else {} %}
 <header class="ticker-head">
-  <h1>{{ ticker }}</h1>
-  {% if profile %}<p class="muted">{{ profile.name }} · {{ profile.sector }} · {{ profile.industry }}{% if profile.employees %} · {{ "{:,}".format(profile.employees) }} employees{% endif %}{% if profile.beta %} · beta {{ "%.2f"|format(profile.beta) }}{% endif %}</p>{% endif %}
+  <h1>{{ ticker }}{% if N %} <span class="muted h1sub">{{ N.headline.company if N.headline.company != ticker else "" }}</span>{% elif profile %} <span class="muted h1sub">{{ profile.name }} · {{ profile.sector }} · {{ profile.industry }}</span>{% endif %}</h1>
   {% if stats and stats.close %}
   <div class="stats">
     <span class="big">{{ stats.close|num }}</span> <span class="muted">close {{ stats.asof }}</span>
@@ -12,6 +13,11 @@
     {% if stats.drawdown_52w is not none %}<span class="muted">vs 52w high {{ stats.drawdown_52w|pct }} · vs 52w low {{ stats.dist_52w_low|pct }}</span>{% endif %}
   </div>
   {% else %}<p class="muted">No stored prices yet.</p>{% endif %}
+  {% if N %}
+  <p class="reading"><strong>Score {{ N.headline.composite if N.headline.composite is not none else "n/a" }}</strong>: {{ N.headline.reading }}{% if N.headline.veto_note %} · <span class="warn">{{ N.headline.veto_note }}</span>{% endif %} · outlook <span class="label">{{ outlook.label }}</span> · <a href="{{ N.report_url }}">full report</a>{% if N.note_date %} <span class="muted">(run of {{ N.note_date }})</span>{% endif %}</p>
+  {% if newer_data %}<p class="pill stale">Newer data since this note ({{ newer_data_date }}): fundamentals were refreshed; run Analyze to update the note.</p>{% endif %}
+  {{ facts(N.headline.anchors, sid, idx) }}
+  {% else %}<p class="muted">No analysis yet for {{ ticker }}. Use Analyze cheap or Analyze full below.</p>{% endif %}
   <div class="actions">
     {% if next_earnings %}<span class="pill">Next earnings {{ next_earnings }}</span>{% endif %}
     {% if running %}<span class="running">job running</span>{% endif %}
@@ -30,64 +36,82 @@
   </div>
 </header>
 
-<section class="grid2">
-<div>
-  <div class="tabs">{% for w in windows %}<a class="{{ 'on' if w == window_days }}" href="/t/{{ ticker }}?window={{ w }}&news={{ news_days }}">{{ w }}d</a>{% endfor %}</div>
-  <div id="chart">{% include "_chart.html.j2" %}</div>
-  <h2>What moved it <span class="muted">({{ window_days }} days)</span></h2>
-  <div id="narrative">{% include "_narrative.html.j2" %}</div>
-</div>
-<div>
-  <h2>Outlook <span class="label big-label">{{ outlook.label }}</span></h2>
-  <p class="muted rule">{{ outlook.rule }}</p>
-  {% set c = outlook.components %}
-  {% if c %}
-  <table class="kv">
-    <tr><th>momentum</th><td>{{ c.momentum.direction or "n/a" }} · revenue yoy {% for v in c.momentum.revenue_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}· EPS yoy {% for v in c.momentum.eps_diluted_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}{% if c.momentum.eps_beat_streak is not none %}· beat streak {{ c.momentum.eps_beat_streak|int }}{% endif %}{% if c.momentum.eps_estimate_revision_90d is not none %}· est. revision 90d {{ c.momentum.eps_estimate_revision_90d|pct }}{% endif %}</td></tr>
-    <tr><th>valuation</th><td>{{ c.valuation.state or "n/a" }} · P/E 5y pct {{ c.valuation.pe_5y_percentile|pct(0) if c.valuation.pe_5y_percentile is not none else "n/a" }} · EV/sales 5y pct {{ c.valuation.ev_sales_5y_percentile|pct(0) if c.valuation.ev_sales_5y_percentile is not none else "n/a" }}</td></tr>
-    <tr><th>trend</th><td>{{ c.trend.state or "n/a" }} · 50d {{ c.trend.ma50|num }} ({{ "above" if c.trend.above_ma50 else "below" }}) · 200d {{ c.trend.ma200|num }} ({{ "above" if c.trend.above_ma200 else "below" }}) · 50d slope {{ c.trend.ma50_slope_20d|pct }} · off 52w high {{ c.trend.drawdown_52w|pct }}</td></tr>
-  </table>
-  {% endif %}
-  {% if risk_free %}<p class="muted">10-year Treasury {{ "%.2f"|format(risk_free.year10) }}% ({{ risk_free.date }}) · DCF discount assumptions are in the full report</p>{% endif %}
-  {% include "_peers.html.j2" %}
-  {% include "_segments.html.j2" %}
-  <h3>Dividend</h3>
-  {% if dividends.dividend_per_share_ttm %}<p>TTM {{ dividends.dividend_per_share_ttm|num }} per share · yield {{ (dividends.dividend_yield or 0)|pct }}{% if dividends.dividend_growth_5y is not none %} · 5y growth {{ dividends.dividend_growth_5y|pct }}{% endif %}
-    {% if dividend_rows %}<span class="muted">· last ex-date {{ dividend_rows[0].ex_date }} ({{ dividend_rows[0].amount|num }})</span>{% endif %}</p>{% elif dividends.dividend_per_share_ttm == 0 %}<p class="muted">No dividend paid in the last year.</p>{% else %}<p class="muted">Pays no dividend (none on record).</p>{% endif %}
-  {% include "_ownership.html.j2" %}
-  <h3>Scores and ratings</h3>
-  <p>{% if scores.altman_z is not none %}Altman Z {{ scores.altman_z|num(1) }} · {% endif %}{% if scores.piotroski is not none %}Piotroski {{ scores.piotroski|int }} of 9{% endif %}{% if scores.altman_z is none and scores.piotroski is none %}<span class="muted">no scores</span>{% endif %}
-    {% if ratings %}<br>Analyst ratings ({{ ratings.date }}): strong buy {{ ratings.strong_buy }} · buy {{ ratings.buy }} · hold {{ ratings.hold }} · sell {{ ratings.sell }} · strong sell {{ ratings.strong_sell }}{% endif %}</p>
-  <h3>Cross-check against FMP (TTM)</h3>
-  {% if crosscheck %}<p>{{ crosscheck.ok }} of {{ crosscheck.total }} within 10% <span class="muted">({{ crosscheck.checked }})</span>
-    {% for r in crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.metric }}: ours {{ r.ours|num }} vs FMP {{ r.fmp|num }} ({{ r.diff|pct }})</span>{% endfor %}</p>
-  {% else %}<p class="muted">No cross-check yet (runs at Refresh data).</p>{% endif %}
-  {% if edgar_crosscheck and edgar_crosscheck.total %}<p>FMP vs EDGAR statement lines: {{ edgar_crosscheck.ok }} of {{ edgar_crosscheck.total }} within 2% <span class="muted">({{ edgar_crosscheck.checked }}; the filed value is used when both agree, the reported quarter when EDGAR's is derived, and conflicts are flagged)</span>
-    {% for r in edgar_crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.item }}@{{ r.period }}: FMP {{ r.fmp|num(0) }} vs EDGAR {{ r.edgar|num(0) }} ({{ r.diff|pct }})</span>{% endfor %}</p>{% endif %}
+<section>
+<h2>Business</h2>
+{% if N and N.business.description %}<p>{{ N.business.description }}{{ "…" if N.business.description|length >= 300 }}</p>{% elif profile and profile.description %}<p>{{ profile.description[:300] }}…</p>{% endif %}
+{% if N %}{{ facts(N.business.facts, sid, idx) }}{% endif %}
+{% include "_segments.html.j2" %}
+</section>
 
-  <h2>Decision panel</h2>
-  {% if panel %}
-  <p><strong>Composite {{ panel.composite }}</strong>{% if panel.veto_note %} · <span class="warn">{{ panel.veto_note }}</span>{% endif %}
-    {% if panel.kind == "full" %}· judge agreement {{ panel.judge_agreement }} · dispersion {{ panel.dispersion }} · {{ panel.escalated }} of {{ panel.n_claims }} claims escalated · verdict {{ panel.verdict_date }}{% else %}· cheap run, per-persona scores: {% for a, s in panel.scores.items() %}{{ a }} {{ s }}{{ ", " if not loop.last }}{% endfor %}{% endif %}
-    · <a href="{{ panel.report_url }}">full report</a></p>
-  {% if panel.summary %}<blockquote>{{ panel.summary }}</blockquote>{% endif %}
-  {% if panel.subs and panel.subs.quality_score is not none %}<p class="muted">quality {{ panel.subs.quality_score }} · value {{ panel.subs.value_score }} · earnings momentum {{ panel.subs.earnings_momentum_score }} · accounting risk {{ panel.subs.accounting_risk_score }}</p>{% endif %}
-  <div class="grid2 panel">
-    <div><h3>Bull case</h3>
-      {% for cl in panel.bull %}{% include "_claim.html.j2" %}{% else %}<p class="muted">none</p>{% endfor %}
-      {% if panel.contested_bull %}<h4>Contested</h4>{% for cl in panel.contested_bull %}{% include "_claim.html.j2" %}{% endfor %}{% endif %}
-    </div>
-    <div><h3>Bear case</h3>
-      {% for cl in panel.bear %}{% include "_claim.html.j2" %}{% else %}<p class="muted">none</p>{% endfor %}
-    </div>
-  </div>
-  <h3>Red flags</h3>
-  <ul class="plain">{% for f in panel.red_flags %}<li><strong>{{ f.flag_id }}</strong> [{{ f.severity }}] {{ f.detail }}</li>{% else %}<li class="muted">none from the rules engine</li>{% endfor %}</ul>
-  {% if panel.catalysts %}<h3>Catalysts</h3><ul class="plain">{% for c in panel.catalysts %}<li>{{ c.what }} <span class="muted">({{ c.when }})</span> {% for e in c.evidence %}<a class="ev" hx-get="/evidence/{{ panel.snapshot_id }}/{{ e|urlencode }}" hx-target="#drawer">{{ e }}</a> {% endfor %}</li>{% endfor %}</ul>{% endif %}
-  {% else %}
-  <p class="muted">No analysis yet for {{ ticker }}. Use Analyze cheap or Analyze full above.</p>
-  {% endif %}
+<section>
+<h2>Finances</h2>
+{% if N %}{{ facts(N.finances.facts, sid, idx) }}
+<div class="grid2">
+{% for name, rows in N.finances.tables.items() if rows %}<div><h4>{{ name.replace("_", " ")|capitalize }}</h4>
+<table class="list"><thead><tr><th></th>{% for col, _ in rows[0].cells %}<th>{{ col }}</th>{% endfor %}</tr></thead><tbody>
+{% for r in rows %}<tr><td>{{ r.label }}</td>{% for _, v in r.cells %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}
+</tbody></table></div>{% endfor %}
+</div>{% endif %}
+<h3>Price <span class="tabs small-tabs">{% for w in windows %}<a class="{{ 'on' if w == window_days }}" href="/t/{{ ticker }}?window={{ w }}&news={{ news_days }}">{{ w }}d</a>{% endfor %}</span></h3>
+<div id="chart">{% include "_chart.html.j2" %}</div>
+<h3>Cross-check against FMP (TTM)</h3>
+{% if crosscheck %}<p>{{ crosscheck.ok }} of {{ crosscheck.total }} within 10% <span class="muted">({{ crosscheck.checked }})</span>
+  {% for r in crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.metric }}: ours {{ r.ours|num }} vs FMP {{ r.fmp|num }} ({{ r.diff|pct }})</span>{% endfor %}</p>
+{% else %}<p class="muted">No cross-check yet (runs at Refresh data).</p>{% endif %}
+{% if edgar_crosscheck and edgar_crosscheck.total %}<p>FMP vs EDGAR statement lines: {{ edgar_crosscheck.ok }} of {{ edgar_crosscheck.total }} within 2% <span class="muted">({{ edgar_crosscheck.checked }}; the filed value is used when both agree, the reported quarter when EDGAR's is derived, and conflicts are flagged)</span>
+  {% for r in edgar_crosscheck.rows if r.ok is sameas false %}<br><span class="warn">{{ r.item }}@{{ r.period }}: FMP {{ r.fmp|num(0) }} vs EDGAR {{ r.edgar|num(0) }} ({{ r.diff|pct }})</span>{% endfor %}</p>{% endif %}
+</section>
+
+<section>
+<h2>Red flags</h2>
+{% if N %}{{ facts(N.red_flags.facts, sid, idx) if N.red_flags.facts else '<p class="muted">The rules engine raised no flag.</p>'|safe }}
+<h3>What the bears say</h3>
+{{ claims(N.red_flags.bears, sid, idx) }}{% else %}<p class="muted">No analysis yet.</p>{% endif %}
+<h3>Scores and ratings</h3>
+<p>{% if scores.altman_z is not none %}Altman Z {{ scores.altman_z|num(1) }} · {% endif %}{% if scores.piotroski is not none %}Piotroski {{ scores.piotroski|int }} of 9{% endif %}{% if scores.altman_z is none and scores.piotroski is none %}<span class="muted">no scores</span>{% endif %}
+  {% if ratings %}<br>Analyst ratings ({{ ratings.date }}): strong buy {{ ratings.strong_buy }} · buy {{ ratings.buy }} · hold {{ ratings.hold }} · sell {{ ratings.sell }} · strong sell {{ ratings.strong_sell }}{% endif %}</p>
+</section>
+
+<section>
+<h2>Strategy</h2>
+{% if N %}{{ facts(N.strategy.facts, sid, idx) }}{% endif %}
+<h3>What moved it <span class="muted">({{ window_days }} days)</span></h3>
+<div id="narrative">{% include "_narrative.html.j2" %}</div>
+{% include "_ownership.html.j2" %}
+</section>
+
+<section>
+<h2>Valuation</h2>
+{% if N %}{{ facts(N.valuation.facts, sid, idx) }}{% endif %}
+<h3>Outlook <span class="label big-label">{{ outlook.label }}</span></h3>
+<p class="muted rule">{{ outlook.rule }}</p>
+{% set c = outlook.components %}
+{% if c %}
+<table class="kv">
+  <tr><th>momentum</th><td>{{ c.momentum.direction or "n/a" }} · revenue yoy {% for v in c.momentum.revenue_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}· EPS yoy {% for v in c.momentum.eps_diluted_yoy %}{{ v|pct(0) }}{{ " " }}{% endfor %}{% if c.momentum.eps_beat_streak is not none %}· beat streak {{ c.momentum.eps_beat_streak|int }}{% endif %}{% if c.momentum.eps_estimate_revision_90d is not none %}· est. revision 90d {{ c.momentum.eps_estimate_revision_90d|pct }}{% endif %}</td></tr>
+  <tr><th>valuation</th><td>{{ c.valuation.state or "n/a" }} · P/E 5y pct {{ c.valuation.pe_5y_percentile|pct(0) if c.valuation.pe_5y_percentile is not none else "n/a" }} · EV/sales 5y pct {{ c.valuation.ev_sales_5y_percentile|pct(0) if c.valuation.ev_sales_5y_percentile is not none else "n/a" }}</td></tr>
+  <tr><th>trend</th><td>{{ c.trend.state or "n/a" }} · 50d {{ c.trend.ma50|num }} ({{ "above" if c.trend.above_ma50 else "below" }}) · 200d {{ c.trend.ma200|num }} ({{ "above" if c.trend.above_ma200 else "below" }}) · 50d slope {{ c.trend.ma50_slope_20d|pct }} · off 52w high {{ c.trend.drawdown_52w|pct }}</td></tr>
+</table>
+{% endif %}
+{% if risk_free %}<p class="muted">10-year Treasury {{ "%.2f"|format(risk_free.year10) }}% ({{ risk_free.date }}) · DCF discount assumptions are in the full report</p>{% endif %}
+{% include "_peers.html.j2" %}
+<h3>Dividend</h3>
+{% if dividends.dividend_per_share_ttm %}<p>TTM {{ dividends.dividend_per_share_ttm|num }} per share · yield {{ (dividends.dividend_yield or 0)|pct }}{% if dividends.dividend_growth_5y is not none %} · 5y growth {{ dividends.dividend_growth_5y|pct }}{% endif %}
+  {% if dividend_rows %}<span class="muted">· last ex-date {{ dividend_rows[0].ex_date }} ({{ dividend_rows[0].amount|num }})</span>{% endif %}</p>{% elif dividends.dividend_per_share_ttm == 0 %}<p class="muted">No dividend paid in the last year.</p>{% else %}<p class="muted">Pays no dividend (none on record).</p>{% endif %}
+</section>
+
+<section>
+<h2>The debate</h2>
+{% if N %}
+<div class="grid2 panel">
+  <div><h3>Bull case</h3>{{ claims(N.debate.bull, sid, idx) }}</div>
+  <div><h3>Bear case</h3>{{ claims(N.debate.bear, sid, idx) }}</div>
 </div>
+{% if N.debate.contested %}<h3>Where they disagree</h3>{{ claims(N.debate.contested, sid, idx) }}{% endif %}
+{% if N.debate.summary %}<h3>Judge's summary <span class="muted">({{ N.debate.median_judge }})</span></h3><blockquote>{{ N.debate.summary }}</blockquote>{% endif %}
+{% if N.debate.subscores_text %}<p class="muted">Scores: {{ N.debate.subscores_text }}.</p>{% endif %}
+{% if N.run_kind == "cheap" %}<p class="muted">Scores from a cheap run (no judge verdict): {% for a, s in N.persona_scores|dictsort %}{{ a }} {{ s }}{{ ", " if not loop.last }}{% endfor %}</p>{% endif %}
+{% else %}<p class="muted">No analysis yet for {{ ticker }}.</p>{% endif %}
 </section>
 
 <section>
