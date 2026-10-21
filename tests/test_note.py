@@ -123,3 +123,40 @@ def test_note_without_extras(aapl_metrics):
     n = note.build_note("AAPL", SNAP, aapl_metrics, [], verdict(), analyses(), {}, CHUNKS, FILINGS)
     assert n["headline"]["company"] == "AAPL" and all("None" not in f["text"] for sec in ("business", "finances", "strategy", "valuation") for f in n[sec]["facts"])
     assert not any("iPhone" in f["text"] for f in n["business"]["facts"])
+
+
+def test_cheap_note_renders_without_verdict(aapl_metrics, tmp_path):
+    from fundabot.report.render import render_report
+
+    md_path, html_path = render_report("AAPL", SNAP, with_valuation(aapl_metrics), [], analyses(), CHUNKS, FILINGS, tmp_path, extras=EXTRAS)
+    md = md_path.read_text()
+    assert md.startswith("# AAPL — Apple Inc.") and "no judge verdict yet" in md and "## Business" in md and "## The debate" in md and "Margins expanded." in md and "Debt is rising." in md
+    assert "# Appendix" in md and html_path.exists() and "<details" in html_path.read_text()
+
+
+def test_footnotes_resolve_to_sources(aapl_metrics, tmp_path):
+    from fundabot.report.render import render_verdict
+
+    md_path, html_path = render_verdict("AAPL", SNAP, verdict(), analyses(), [], with_valuation(aapl_metrics), [], CHUNKS, FILINGS, tmp_path, "full", extras=EXTRAS)
+    md, html = md_path.read_text(), html_path.read_text()
+    body = md.split("# Appendix")[0]
+    assert "Capital returns are unsustainable." in body and "[" in body
+    assert "We returned $90 billion to shareholders." in md.split("# Appendix")[1] and "https://www.sec.gov/x/aapl-10k.htm" in md
+    assert 'id="src-1"' in html and 'href="#src-' in html
+
+
+def test_note_without_extras(aapl_metrics, tmp_path):
+    from fundabot.report.render import render_verdict
+
+    md = render_verdict("AAPL", SNAP, verdict(), analyses(), [], with_valuation(aapl_metrics), [], CHUNKS, FILINGS, tmp_path, "full")[0].read_text()
+    assert "None" not in md.split("# Appendix")[0] and md.startswith("# AAPL")
+
+
+def test_note_body_length_and_no_ids_outside_appendix(aapl_metrics, tmp_path):
+    from fundabot.report.render import render_verdict
+
+    md = render_verdict("AAPL", SNAP, verdict(), analyses(), [], with_valuation(aapl_metrics), [], CHUNKS, FILINGS, tmp_path, "full", extras=EXTRAS)[0].read_text()
+    body = md.split("# Appendix")[0]
+    assert len(body.splitlines()) < 200
+    assert "metric:" not in body and "chunk:" not in body and "claude-" not in body and "gpt-" not in body
+    assert "judges agreed" in body and "quality 84" in body

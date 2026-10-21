@@ -214,9 +214,11 @@ async def analyze(conn: psycopg.Connection, ticker: str, personas: list[str], ad
     metrics, flags = snapshot.load_metrics(conn, sid), snapshot.load_flags(conn, sid)
     chunks_by_id = load_chunks(conn, sorted({c for a in analyses for c in a["chunk_ids"]}))
     with conn.cursor() as cur:
-        cur.execute("SELECT accession, form, filed FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (s["accessions"],))
-        filings = [dict(zip(["accession", "form", "filed"], r)) for r in cur.fetchall()]
-    _, html = render_report(ticker, s, metrics, flags, analyses, chunks_by_id, filings, out_dir)
+        cur.execute("SELECT accession, form, filed, primary_doc_url FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (s["accessions"],))
+        filings = [dict(zip(["accession", "form", "filed", "primary_doc_url"], r)) for r in cur.fetchall()]
+    from fundabot.report.note import load_extras
+
+    _, html = render_report(ticker, s, metrics, flags, analyses, chunks_by_id, filings, out_dir, extras=load_extras(conn, s["cik"], ticker))
     log.info("%s: report %s", ticker, html)
     return html
 
@@ -322,9 +324,11 @@ async def analyze_full(conn: psycopg.Connection, ticker: str, personas: list[str
     with conn.cursor() as cur:
         cur.execute("INSERT INTO verdicts (snapshot_id, run_kind, verdict) VALUES (%s, %s, %s) ON CONFLICT (snapshot_id, run_kind) DO UPDATE SET verdict = EXCLUDED.verdict, created_at = now()",
                     (sid, run_kind, Jsonb(verdict)))
-        cur.execute("SELECT accession, form, filed FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (accessions,))
-        filings = [dict(zip(["accession", "form", "filed"], r)) for r in cur.fetchall()]
+        cur.execute("SELECT accession, form, filed, primary_doc_url FROM filings WHERE accession = ANY(%s) ORDER BY filed DESC", (accessions,))
+        filings = [dict(zip(["accession", "form", "filed", "primary_doc_url"], r)) for r in cur.fetchall()]
     conn.commit()
-    _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir, run_kind)
+    from fundabot.report.note import load_extras
+
+    _, html = render_verdict(ticker, s, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir, run_kind, extras=load_extras(conn, s["cik"], ticker))
     log.info("%s: verdict %s composite %s", ticker, html, verdict["composite_score"])
     return html

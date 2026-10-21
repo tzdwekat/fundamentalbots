@@ -1,0 +1,152 @@
+# {{ n.ticker }} — {{ n.headline.company }}
+
+{% set h = n.headline %}{% if h.price %}{{ h.price }} on {{ h.price_date }}{% if h.market_cap %} · market cap {{ h.market_cap }}{% endif %} · {% endif %}**Score {{ h.composite if h.composite is not none else "n/a" }}**: {{ h.reading }}{% if h.veto_note %} · {{ h.veto_note }}{% endif %}{% if h.outlook %} · outlook: {{ h.outlook }}{% endif %}
+
+{% for a in h.anchors %}- {{ a.text }} {{ a.ref }}
+{% endfor %}
+## Business
+
+{% if n.business.description %}{{ n.business.description }}{{ "…" if n.business.description|length >= 300 }}
+
+{% endif %}{% for f in n.business.facts %}- {{ f.text }} {{ f.ref }}
+{% else %}- No company profile stored yet (run Refresh data).
+{% endfor %}
+## Finances
+
+{% for f in n.finances.facts %}- {{ f.text }}{% if f.flags_text %} *({{ f.flags_text }})*{% endif %} {{ f.ref }}
+{% endfor %}
+{% for name, rows in n.finances.tables.items() if rows %}
+**{{ name.replace("_", " ")|capitalize }}**
+
+| | {% for col, _ in rows[0].cells %}{{ col }} | {% endfor %}
+|---|{% for _ in rows[0].cells %}---|{% endfor %}
+{% for r in rows %}| {{ r.label }} | {% for _, v in r.cells %}{{ v }} | {% endfor %}
+{% endfor %}
+{% endfor %}
+{{ n.charts_html }}
+
+## Red flags
+
+{% for f in n.red_flags.facts %}- {{ f.text }} {{ f.ref }}
+{% else %}- The rules engine raised no flag.
+{% endfor %}
+**What the bears say**
+
+{% for c in n.red_flags.bears %}- {{ c.text }} {{ c.ref }}{% if c.refutations %} — answered by {{ c.refutations[0].by.split("/")[0] }}: {{ c.refutations[0].reason }} {{ c.refutations[0].ref }}{% endif %}
+{% else %}- No surviving negative claim.
+{% endfor %}
+## Strategy
+
+{% if n.strategy.narrative %}Recent price action: {{ n.strategy.narrative }}
+
+{% endif %}{% for f in n.strategy.facts %}- {{ f.text }}{% if f.flags_text %} *({{ f.flags_text }})*{% endif %} {{ f.ref }}
+{% else %}- No guidance, estimate or catalyst data stored.
+{% endfor %}
+## Valuation
+
+{% for f in n.valuation.facts %}- {{ f.text }}{% if f.flags_text %} *({{ f.flags_text }})*{% endif %} {{ f.ref }}
+{% else %}- No valuation data (price unavailable).
+{% endfor %}
+## The debate
+
+**Bull case**
+
+{% for c in n.debate.bull %}- {{ c.text }} {{ c.ref }}
+{% else %}- No surviving positive claim.
+{% endfor %}
+**Bear case**
+
+{% for c in n.debate.bear %}- {{ c.text }} {{ c.ref }}
+{% else %}- No surviving negative claim.
+{% endfor %}
+{% if n.debate.contested %}**Where they disagree**
+
+{% for c in n.debate.contested %}- {{ c.text }} {{ c.ref }} ({{ c.agent.split("/")[0] }}){% for r in c.refutations %} — {{ r.by.split("/")[0] }} answers: {{ r.reason }} {{ r.ref }}{% endfor %}{% if c.notes %} — judge: {{ c.notes[0] }}{% endif %}
+{% endfor %}
+{% endif %}{% if n.debate.summary %}**Judge's summary** ({{ n.debate.median_judge }}): {{ n.debate.summary }}
+
+{% endif %}{% if n.debate.subscores_text %}Scores: {{ n.debate.subscores_text }}.
+{% endif %}
+---
+
+# Appendix
+
+<details markdown="1"><summary>Run details</summary>
+
+{{ n.appendix.run_details }}
+
+</details>
+
+{% if n.appendix.grid %}<details markdown="1"><summary>Score grid</summary>
+
+{{ n.heatmap_html }}
+
+| persona | {{ n.appendix.providers|join(" | ") }} | spread |
+|---|{% for _ in n.appendix.providers %}---|{% endfor %}---|
+{% for persona in n.personas %}| {{ persona }} | {% for pr in n.appendix.providers %}{% set c = n.appendix.grid.get(persona ~ "/" ~ pr) %}{% if c %}{{ c.score }} / {{ "%.2f"|format(c.confidence) }} / {{ "%.0f"|format(c.hallucination_rate * 100) }}%{% else %}failed{% endif %} | {% endfor %}{{ "%.2f"|format((n.appendix.dispersion_by_persona or {}).get(persona, 0)) }} |
+{% endfor %}| spread | {% for pr in n.appendix.providers %}{{ "%.2f"|format((n.appendix.dispersion_by_provider or {}).get(pr, 0)) }} | {% endfor %} |
+
+Revised scores after rebuttal: {% for a, s in (n.appendix.revised_scores or {})|dictsort %}{{ a }} {{ s }}{{ ", " if not loop.last }}{% endfor %}. Agent weights: {% for a, w in (n.appendix.agent_weights or {})|dictsort %}{{ a }} {{ w }}{{ ", " if not loop.last }}{% endfor %}.
+
+</details>
+
+{% endif %}<details markdown="1"><summary>Persona outputs ({{ n.appendix.personas|length }})</summary>
+
+{% for a in n.appendix.personas %}
+### {{ a.persona|capitalize }} ({{ a.provider }}/{{ a.model }})
+
+{{ a.grounded.thesis }}
+{% if a.grounded.thesis_unsupported_numbers %}
+> ⚠ unsupported numbers in thesis: {{ a.grounded.thesis_unsupported_numbers|join(", ") }}
+{% endif %}
+**Claims**
+{% for c in a.grounded.claims %}
+- ({{ c.direction }}, weight {{ c.weight }}) {{ c.text }} — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}{% if c.unsupported_numbers %} ⚠ unsupported: {{ c.unsupported_numbers|join(", ") }}{% endif %}
+{% endfor %}
+{% if a.grounded.dropped_claims %}
+Dropped for unresolved evidence ({{ a.grounded.dropped_claims|length }}):
+{% for c in a.grounded.dropped_claims %}
+- ~~{{ c.text }}~~ — {% for e in c.evidence %}`{{ e }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}
+{% endif %}
+**Key risks:** {{ a.grounded.key_risks|join("; ") }}
+
+**What would change my mind:** {{ a.grounded.what_would_change_my_mind|join("; ") }}
+{% if a.grounded.risks_unsupported_numbers %}
+> ⚠ unsupported numbers in risks: {{ a.grounded.risks_unsupported_numbers|join(", ") }}
+{% endif %}
+{% if a.rebuttal %}**Rebuttal:** revised score {{ a.rebuttal.revised_score }} (confidence {{ a.rebuttal.revised_confidence }}){% for r in a.rebuttal.responses %}; {{ r.verdict }} `{{ r.claim_id }}`: {{ r.reason }}{% endfor %}{% if a.rebuttal.withdraws %}; withdraws {% for w in a.rebuttal.withdraws %}`{{ w }}`{{ ", " if not loop.last }}{% endfor %}{% endif %}
+
+{% endif %}Grounding: {{ a.grounded.stats.claims_total }} claims, {{ a.grounded.stats.claims_dropped }} dropped, hallucination rate {{ "%.0f"|format(a.grounded.stats.hallucination_rate * 100) }}% ({{ a.grounded.stats.numbers_unsupported }}/{{ a.grounded.stats.numbers_total }} numbers). Retrieved chunks: {% for cid in a.chunk_ids %}`chunk:{{ cid }}`{{ ", " if not loop.last }}{% endfor %}
+{% endfor %}
+
+</details>
+
+<details markdown="1"><summary>Metrics table</summary>
+
+{% for group, rows in n.appendix.metrics_table %}
+### {{ group }}
+
+| metric | {{ n.appendix.columns|join(" | ") }} |
+|---|{% for _ in n.appendix.columns %}---|{% endfor %}
+{% for mid, cells in rows %}| `{{ mid }}` | {{ cells|join(" | ") }} |
+{% endfor %}
+{% endfor %}
+Flags: `*` = restated, derived, out_of_bounds, source_conflict (FMP and the filing disagree; the filed value is shown) or partial data (see the sources for each metric's inputs).
+
+</details>
+
+<details markdown="1"><summary>DCF assumptions and cross-checks</summary>
+
+Discount rate {{ "%.1f%%"|format(n.appendix.dcf.discount_rate * 100) }}, terminal growth {{ "%.1f%%"|format(n.appendix.dcf.terminal_growth * 100) }}, {{ n.appendix.dcf.years }} years explicit; bear/base/bull growth cases as in the valuation module.
+{% if n.appendix.crosschecks.edgar and n.appendix.crosschecks.edgar.total %}
+FMP vs EDGAR statement lines: {{ n.appendix.crosschecks.edgar.ok }} of {{ n.appendix.crosschecks.edgar.total }} within 2%.{% endif %}{% if n.appendix.crosschecks.fmp %} FMP TTM ratios: {{ n.appendix.crosschecks.fmp.ok }} of {{ n.appendix.crosschecks.fmp.total }} within 10%.{% endif %}
+
+</details>
+
+<details markdown="1" open><summary>Sources ({{ n.appendix.sources|length }})</summary>
+
+{% for s in n.appendix.sources %}<p id="src-{{ s.n }}"><b>[{{ s.n }}]</b> <code>{{ s.id }}</code> — {{ s.text }}{% if s.url %} <a href="{{ s.url }}">filing</a>{% endif %}</p>
+{% endfor %}
+
+</details>

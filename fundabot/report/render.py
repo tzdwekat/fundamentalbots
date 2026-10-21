@@ -1,49 +1,58 @@
-"""Render the verdict-less Phase 2 report: scores, per-persona theses with grounding, metrics, sources."""
+"""Render the analyst note (full and cheap runs) from stored data; see fundabot/report/note.py."""
+import re
 from pathlib import Path
 
 import markdown
 from jinja2 import Environment, FileSystemLoader
 
-from fundabot.analytics.earnings import IDS as EARNINGS_IDS
 from fundabot.analytics.metrics import Metric
 from fundabot.analytics.valuation import DISCOUNT_RATE, TERMINAL_GROWTH, YEARS
 from fundabot.report import charts
-from fundabot.report.table import GROUPS, columns_for, fmt
 from fundabot.retrieval.chunk import Chunk
 
 ENV = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"), autoescape=False)
 CSS = "body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;line-height:1.45}" \
       "table{border-collapse:collapse;font-size:13px;margin:1em 0}td,th{border:1px solid #ccc;padding:3px 6px;text-align:right}" \
-      "th:first-child,td:first-child{text-align:left}code{background:#f4f4f4;padding:1px 3px}blockquote{color:#a40;border-left:3px solid #a40;padding-left:.6em}" + charts.VIZ_CSS
+      "th:first-child,td:first-child{text-align:left}code{background:#f4f4f4;padding:1px 3px}blockquote{color:#a40;border-left:3px solid #a40;padding-left:.6em}" \
+      "a.fn{font-size:11px;vertical-align:super;text-decoration:none;color:#2a78d6}details{margin:.6em 0}summary{cursor:pointer;font-weight:600}h2{margin-top:1.4em}" + charts.VIZ_CSS
 
 
-def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir: Path, run_kind: str = "full") -> tuple[Path, Path]:
-    """Verdict sections, then the per-agent report (15 agents with their rebuttals) and the sources appendix."""
-    from fundabot.agents.context import metric_line
+def _footnote_links(md: str) -> str:
+    """[1,2] markers become anchors into the Sources list."""
+    return re.sub(r"\[(\d+(?:,\d+)*)\]", lambda m: " ".join(f'<a class="fn" href="#src-{n}">[{n}]</a>' for n in m.group(1).split(",")), md)
+
+
+def _render_note(ticker, snapshot, metrics, flags, verdict, analyses, chunks_by_id, filings, out_dir: Path, run_kind: str, extras: dict | None, suffix: str) -> tuple[Path, Path]:
     from fundabot.agents.runner import PERSONA_ORDER
+    from fundabot.report.note import build_note
 
-    earnings_lines = [metric_line(m) for m in metrics if (m.metric_id in EARNINGS_IDS or "llm_extracted" in m.flags) and m.value is not None]
-    cells = {tuple(k.split("/")): (c.get("score") if c else None) for k, c in verdict["grid"].items()}
-    for p in PERSONA_ORDER:
-        for pr in verdict["providers"]:
-            cells.setdefault((p, pr), None)
-    heat = '<div class="viz-root">' + charts.heatmap([p for p in PERSONA_ORDER if any(k[0] == p for k in cells)], verdict["providers"], cells) + "</div>"
-    head = ENV.get_template("verdict.md.j2").render(ticker=ticker.upper(), snapshot=snapshot, verdict=verdict, personas=PERSONA_ORDER, earnings_lines=earnings_lines,
-                                                    heatmap_html=heat)
+    n = build_note(ticker, snapshot, metrics, flags, verdict, analyses, extras, chunks_by_id, filings, run_kind=run_kind)
+    n["charts_html"] = " ".join(line.strip() for line in chart_block(metrics).splitlines())  # one line: the note's prose stays readable in Markdown
+    n["personas"] = [p for p in PERSONA_ORDER if any(a["persona"] == p for a in analyses)]
+    heat = ""
+    if verdict and verdict.get("grid"):
+        cells = {tuple(k.split("/")): (c.get("score") if c else None) for k, c in verdict["grid"].items()}
+        for p in n["personas"]:
+            for pr in verdict.get("providers", []):
+                cells.setdefault((p, pr), None)
+        heat = '<div class="viz-root">' + charts.heatmap(n["personas"], verdict.get("providers", []), cells) + "</div>"
+    n["heatmap_html"] = heat
+    md = ENV.get_template("note.md.j2").render(n=n)
+    out = out_dir / ticker.upper()
+    out.mkdir(parents=True, exist_ok=True)
+    md_path, html_path = out / f"{snapshot['id']}{suffix}.md", out / f"{snapshot['id']}{suffix}.html"
+    md_path.write_text(md)
+    body = markdown.markdown(_footnote_links(md), extensions=["tables", "md_in_html"])
+    html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>{ticker.upper()} {'verdict' if verdict else 'fundamentals'}</title><style>{CSS}</style></head><body>{body}</body></html>")
+    return md_path, html_path
+
+
+def render_verdict(ticker, snapshot, verdict, analyses, rebuttals, metrics, flags, chunks_by_id, filings, out_dir: Path, run_kind: str = "full", extras: dict | None = None) -> tuple[Path, Path]:
+    """The analyst note for a full run: headline, business, finances, red flags, strategy, valuation, the debate, appendix."""
     by_agent = {r["agent"]: r["output"] for r in rebuttals}
     for a in analyses:
         a["rebuttal"] = by_agent.get(a["agent"])
-    body_md, _ = render_report(ticker, snapshot, metrics, flags, analyses, chunks_by_id, filings, out_dir)
-    body = body_md.read_text().split("\n", 1)[1]
-    body_md.unlink()
-    body_md.with_suffix(".html").unlink(missing_ok=True)
-    md = head + "\n---\n# Agent detail\n" + body
-    out = out_dir / ticker.upper()
-    md_path, html_path = out / f"{snapshot['id']}-{run_kind}.md", out / f"{snapshot['id']}-{run_kind}.html"
-    md_path.write_text(md)
-    html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>{ticker.upper()} verdict</title><style>{CSS}</style></head><body>"
-                         f"{markdown.markdown(md, extensions=['tables'])}</body></html>")
-    return md_path, html_path
+    return _render_note(ticker, snapshot, metrics, flags, verdict, analyses, chunks_by_id, filings, out_dir, run_kind, extras, f"-{run_kind}")
 
 
 def chart_block(metrics: list[Metric]) -> str:
@@ -77,30 +86,8 @@ def _cited_ids(analyses: list[dict]) -> tuple[set[str], set[str]]:
 
 
 def render_report(ticker: str, snapshot: dict, metrics: list[Metric], flags, analyses: list[dict], chunks_by_id: dict[str, Chunk],
-                  filings: list[dict], out_dir: Path) -> tuple[Path, Path]:
-    cols = columns_for(metrics)
-    lookup = {(m.metric_id, m.period): m for m in metrics}
-    groups = []
-    for group, ids in GROUPS.items():
-        rows = [(mid, [fmt(lookup[(mid, c)]) if (mid, c) in lookup else "" for c in cols]) for mid in ids]
-        rows = [r for r in rows if any(r[1])]
-        if rows:
-            groups.append((group, rows))
-    metric_ids, chunk_ids = _cited_ids(analyses)
-    cited_metrics = sorted((m for m in metrics if m.metric_id in {i.split("@")[0] for i in metric_ids}
-                            and (f"{m.metric_id}@{m.period}" in metric_ids or m.metric_id in metric_ids)), key=lambda m: (m.metric_id, m.period))
-    cited_chunks = [chunks_by_id[c] for c in sorted(chunk_ids) if c in chunks_by_id]
-    scores = [a["grounded"]["score"] for a in analyses]
-    md = ENV.get_template("report.md.j2").render(
-        ticker=ticker, snapshot=snapshot, filings=filings, flags=flags, analyses=analyses, charts_html=chart_block(metrics),
-        mean_score=sum(scores) / len(scores) if scores else 0.0, columns=cols, metric_groups=groups,
-        dcf={"discount_rate": DISCOUNT_RATE, "terminal_growth": TERMINAL_GROWTH, "years": YEARS},
-        cited_metrics=cited_metrics, cited_chunks=cited_chunks,
-    )
-    out = out_dir / ticker.upper()
-    out.mkdir(parents=True, exist_ok=True)
-    md_path, html_path = out / f"{snapshot['id']}.md", out / f"{snapshot['id']}.html"
-    md_path.write_text(md)
-    body = markdown.markdown(md, extensions=["tables"])
-    html_path.write_text(f"<!doctype html><html><head><meta charset='utf-8'><title>{ticker.upper()} fundamentals</title><style>{CSS}</style></head><body>{body}</body></html>")
-    return md_path, html_path
+                  filings: list[dict], out_dir: Path, extras: dict | None = None) -> tuple[Path, Path]:
+    """The analyst note for a cheap run (no verdict): the debate comes from the persona claims."""
+    for a in analyses:
+        a.setdefault("rebuttal", None)
+    return _render_note(ticker, snapshot, metrics, flags, None, analyses, chunks_by_id, filings, out_dir, "cheap", extras, "")

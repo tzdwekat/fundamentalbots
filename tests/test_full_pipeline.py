@@ -88,9 +88,9 @@ async def test_full_run_call_counts_and_verdict(fixture_prepare, fmp_fixture, tm
     assert all((c["id"] in v["escalated_ids"]) == (c["judge"]["path"] == "escalated") for c in listed)
     assert v["screen_judges"][0]["model"] == "anthropic-screen" and v["judges"][0]["model"] == "anthropic-judge"
     md = html.with_suffix(".md").read_text()
-    assert html.name.endswith("-full.html") and "Judge agreement" in md and "bull" in md and "contested" in md.lower()
-    assert "claims escalated" in md and "escalation panel" in md and "screen panel" in md
-    assert "anthropic judge summary" in md and "openai judge summary" in md and "eps_surprise" in md
+    assert html.name.endswith("-full.html") and "judges agreed" in md and "Bull case" in md and "Bear case" in md  # no contested claims in the fixture run
+    assert "claims escalated" in md and "escalation panel" in md.lower() and "screen panel" in md.lower()
+    assert "anthropic judge summary" in md and "openai judge summary" in md and "eps_surprise" in md  # the other judges and the metrics table live in the appendix
 
 
 @pytest.mark.db

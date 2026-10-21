@@ -71,7 +71,7 @@ async def test_end_to_end_report_written(fixture_prepare, tmp_path):
     assert html.exists() and md.exists() and html.parent.name == "AAPL"
     text = md.read_text()
     assert "metric:gross_margin@FY2024" in text and all(p in text for p in PERSONAS)
-    assert "unweighted mean" in text and "$999 billion" in text and "dropped" in text.lower()
+    assert "no judge verdict yet" in text and "$999 billion" in text and "dropped" in text.lower()
     assert "chunk:0000320193-25-000079#item1a-0" in text
     assert adapter.calls == 5
 
@@ -105,7 +105,7 @@ async def test_report_contains_charts(fixture_prepare, tmp_path):
     conn = fixture_prepare
     html = await pipeline.analyze(conn, "AAPL", PERSONAS, FakeAdapter(fake_output), FakeEmbedder(), out_dir=tmp_path)
     text = html.read_text()
-    assert "## Charts" in html.with_suffix(".md").read_text() or "Charts" in text
+    assert "## Finances" in html.with_suffix(".md").read_text()
     assert text.count("<svg") >= 4 and "Revenue and free cash flow" in text and "Margins and return on capital" in text and "Valuation against its own 5-year range" in text
     assert ".viz-root" in text and "prefers-color-scheme: dark" in text
 

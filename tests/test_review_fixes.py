@@ -127,7 +127,7 @@ async def test_catalysts_and_summaries_are_checked(fixture_prepare, fmp_fixture,
         cur.execute("SELECT verdict FROM verdicts"); v = cur.fetchone()[0]
     assert [c["what"] for c in v["catalysts"]] == ["real"]
     assert v["summary_unsupported"]["anthropic"] == ["$999 billion"]
-    assert "unsupported numbers in summary" in html.with_suffix(".md").read_text()
+    assert "unsupported numbers in" in html.with_suffix(".md").read_text().lower()
 
 
 @pytest.mark.db
